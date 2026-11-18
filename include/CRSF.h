@@ -24,9 +24,9 @@
 class CRSF {
 public:
     CRSF();
-    
-    // Initialize CRSF with Serial port
-    void begin(HardwareSerial &serial);
+
+    // Initialize CRSF with Serial port - returns false if initialization failed
+    bool begin(HardwareSerial &serial);
     
     // Set channel value (0-15, value 172-1811)
     void setChannel(uint8_t channel, uint16_t value);

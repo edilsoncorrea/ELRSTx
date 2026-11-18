@@ -28,8 +28,13 @@ CRSF::CRSF() {
     }
 }
 
-void CRSF::begin(HardwareSerial &serial) {
+bool CRSF::begin(HardwareSerial &serial) {
     _serial = &serial;
+    // Validate that serial pointer is valid
+    if (_serial == nullptr) {
+        return false;
+    }
+    return true;
 }
 
 void CRSF::setChannel(uint8_t channel, uint16_t value) {
@@ -90,58 +95,63 @@ void CRSF::packChannels(uint8_t *buffer) {
 }
 
 void CRSF::sendRCFrame() {
-    if (_serial == nullptr) return;
-    
+    if (_serial == nullptr) {
+        return; // Silent fail - but should not happen if begin() was called
+    }
+
     uint8_t frame[26];
-    
+
     // Frame structure:
     // [0] = Sync byte (0xC8)
     // [1] = Frame length (frame type + payload + crc)
     // [2] = Frame type (0x16 for RC channels)
     // [3-24] = 22 bytes of packed channel data
     // [25] = CRC8
-    
+
     frame[0] = CRSF_SYNC_BYTE;
     frame[1] = 24; // length of (frame type + payload + crc)
     frame[2] = CRSF_FRAMETYPE_RC_CHANNELS;
-    
+
     // Pack channels into frame
     packChannels(&frame[3]);
-    
+
     // Calculate CRC over frame type and payload (not including sync and length)
     frame[25] = crc8(&frame[2], 23);
-    
-    // Send frame
+
+    // Send frame - use non-blocking write
+    // Note: write() is non-blocking, frames may be dropped if buffer full
     _serial->write(frame, 26);
+    _serial->flush(); // Ensure frame is sent
 }
 
 void CRSF::sendRCFrame(uint8_t* captureBuffer) {
     if (_serial == nullptr) return;
-    
+
     uint8_t frame[26];
-    
+
     // Frame structure:
     // [0] = Sync byte (0xC8)
     // [1] = Frame length (frame type + payload + crc)
     // [2] = Frame type (0x16 for RC channels)
     // [3-24] = 22 bytes of packed channel data
     // [25] = CRC8
-    
+
     frame[0] = CRSF_SYNC_BYTE;
     frame[1] = 24; // length of (frame type + payload + crc)
     frame[2] = CRSF_FRAMETYPE_RC_CHANNELS;
-    
+
     // Pack channels into frame
     packChannels(&frame[3]);
-    
+
     // Calculate CRC over frame type and payload (not including sync and length)
     frame[25] = crc8(&frame[2], 23);
-    
-    // Copy to capture buffer if provided
+
+    // Copy to capture buffer if provided (for analysis)
     if (captureBuffer != nullptr) {
         memcpy(captureBuffer, frame, 26);
     }
-    
-    // Send frame
+
+    // Send frame - use non-blocking write
     _serial->write(frame, 26);
+    _serial->flush(); // Ensure frame is sent
 }

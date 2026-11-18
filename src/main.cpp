@@ -7,10 +7,10 @@
 // #define RUN_UNIT_TESTS
 
 // Uncomment to enable SIMULATION MODE (without physical joysticks)
-#define SIMULATION_MODE
+// #define SIMULATION_MODE
 
 // Uncomment to show CRSF frame data in hex
-#define SHOW_CRSF_FRAMES
+// #define SHOW_CRSF_FRAMES
 
 // Simulation parameters
 #define SIM_SPEED       1.0f    // Speed multiplier for simulation
@@ -51,10 +51,15 @@ CRSF crsf;
 unsigned long lastUpdate = 0;
 unsigned long lastBlink = 0;
 bool ledState = false;
+unsigned long lastCRSFFrame = 0;
 
 // Simulation variables
 float simTime = 0.0f;
 bool simulationEnabled = false;
+
+// Communication monitoring
+#define CRSF_TIMEOUT_MS 1000  // Alert if no frame sent for 1 second
+bool crsfTimeout = false;
 
 // Buffer to capture CRSF frames
 uint8_t lastCrsfFrame[26];
@@ -149,7 +154,7 @@ void printCRSFFrame(const uint8_t* frame) {
 void setup() {
     // Configure LED first to show we're alive
     pinMode(LED_PIN, OUTPUT);
-    
+
     // Blink 3 times to show boot
     for(int i = 0; i < 3; i++) {
         digitalWrite(LED_PIN, HIGH);
@@ -157,11 +162,11 @@ void setup() {
         digitalWrite(LED_PIN, LOW);
         delay(200);
     }
-    
+
     // Initialize Serial for debugging - ESP32-C3 USB CDC
     Serial.begin(115200);
-    delay(3000); // Espera para USB CDC estar pronto
-    
+    delay(3000); // Wait for USB CDC to be ready
+
     Serial.println();
     Serial.println();
     Serial.println("===========================================");
@@ -171,7 +176,7 @@ void setup() {
     Serial.print("Boot OK! Free heap: ");
     Serial.println(ESP.getFreeHeap());
     Serial.println();
-    
+
 #ifdef RUN_UNIT_TESTS
     // Run unit tests
     CRSFTest::runAllTests();
@@ -181,29 +186,49 @@ void setup() {
     }
     while (Serial.available()) Serial.read(); // Clear buffer
 #endif
-    
-    // Configure LED
-    pinMode(LED_PIN, OUTPUT);
+
+    // LED is already configured above, just ensure it's set to on
     digitalWrite(LED_PIN, HIGH);
     
     // Configure ADC resolution (ESP32 default is 12-bit = 0-4095)
     analogReadResolution(12);
     analogSetAttenuation(ADC_11db); // Full range ~0-3.3V
-    
+    delay(100); // Wait for ADC to be ready
+
     // Configure joystick pins
     pinMode(JOY1_X_PIN, INPUT);
     pinMode(JOY1_Y_PIN, INPUT);
     pinMode(JOY2_X_PIN, INPUT);
     pinMode(JOY2_Y_PIN, INPUT);
+
+    // Test ADC with dummy reads to ensure it's working
+    for (int i = 0; i < 4; i++) {
+        analogRead(JOY1_X_PIN);
+        delay(10);
+    }
     
-    // Initialize CRSF on Serial1 (TX only - ExpressLRS só precisa receber)
-    // ESP32-C3 tem apenas Serial e Serial1 (não tem Serial2)
+    // Initialize CRSF on Serial1 (TX only - ExpressLRS only needs to receive)
+    // ESP32-C3 has Serial (USB CDC) and Serial1 (UART1)
+    // Serial1 uses GPIO21 as default TX, GPIO20 as default RX
     Serial1.begin(CRSF_BAUDRATE, SERIAL_8N1, -1, CRSF_TX_PIN);
-    crsf.begin(Serial1);
-    
-    Serial.println("CRSF initialized on Serial1");
-    Serial.printf("Baudrate: %d\n", CRSF_BAUDRATE);
-    Serial.printf("TX Pin: %d (conecta ao RX do ExpressLRS)\n", CRSF_TX_PIN);
+    delay(100); // Wait for Serial1 to initialize
+
+    // Initialize CRSF with validation
+    if (!crsf.begin(Serial1)) {
+        Serial.println("ERROR: CRSF initialization failed!");
+        Serial.println("System halted - cannot communicate with ExpressLRS");
+        while(1) {
+            digitalWrite(LED_PIN, HIGH);
+            delay(100);
+            digitalWrite(LED_PIN, LOW);
+            delay(100);
+        }
+    }
+
+    Serial.println("✓ CRSF initialized on Serial1");
+    Serial.printf("  Baudrate: %d bps\n", CRSF_BAUDRATE);
+    Serial.printf("  TX Pin: GPIO%d (connects to ExpressLRS RX)\n", CRSF_TX_PIN);
+    Serial.println();
     
 #ifdef SIMULATION_MODE
     simulationEnabled = true;
@@ -259,43 +284,66 @@ void loop() {
         crsf.setChannel(CH_YAW, crsf.mapAnalogToCRSF(joy2_x));
         
         // Send CRSF frame with capture
+        lastCRSFFrame = currentTime;
+        crsfTimeout = false;  // Reset timeout flag
+
 #ifdef SHOW_CRSF_FRAMES
         crsf.sendRCFrame(lastCrsfFrame);
 #else
         crsf.sendRCFrame();
 #endif
         
-        // Debug output every 500ms
+        // Debug output every 500ms (non-blocking debug)
         static unsigned long lastDebug = 0;
         static unsigned long frameCount = 0;
         frameCount++;
-        
+
         if (currentTime - lastDebug >= 500) {
             lastDebug = currentTime;
-            
+
+            // Use compact output to minimize Serial printf blocking
+            char debugBuf[128];
+
             if (simulationEnabled) {
-                Serial.printf("[SIM] Time:%.1fs | ", simTime);
+                snprintf(debugBuf, sizeof(debugBuf),
+                    "[SIM] T:%.1fs | ADC:L(%u,%u) R(%u,%u) | CRSF:R%u P%u T%u Y%u | F:%lu\n",
+                    simTime, joy1_x, joy1_y, joy2_x, joy2_y,
+                    crsf.getChannel(CH_ROLL),
+                    crsf.getChannel(CH_PITCH),
+                    crsf.getChannel(CH_THROTTLE),
+                    crsf.getChannel(CH_YAW),
+                    frameCount);
             } else {
-                Serial.printf("[HW]  ");
+                snprintf(debugBuf, sizeof(debugBuf),
+                    "[HW] ADC:L(%u,%u) R(%u,%u) | CRSF:R%u P%u T%u Y%u | F:%lu\n",
+                    joy1_x, joy1_y, joy2_x, joy2_y,
+                    crsf.getChannel(CH_ROLL),
+                    crsf.getChannel(CH_PITCH),
+                    crsf.getChannel(CH_THROTTLE),
+                    crsf.getChannel(CH_YAW),
+                    frameCount);
             }
-            
-            Serial.printf("ADC: L(%4d,%4d) R(%4d,%4d) | ",
-                joy1_x, joy1_y, joy2_x, joy2_y);
-            Serial.printf("CRSF: R:%4d P:%4d T:%4d Y:%4d | Frames:%lu\n",
-                crsf.getChannel(CH_ROLL),
-                crsf.getChannel(CH_PITCH),
-                crsf.getChannel(CH_THROTTLE),
-                crsf.getChannel(CH_YAW),
-                frameCount);
-            
+
+            // Send debug output (should not block, but keep it concise)
+            Serial.print(debugBuf);
+
 #ifdef SHOW_CRSF_FRAMES
             printCRSFFrame(lastCrsfFrame);
 #endif
         }
     }
     
-    // Blink LED to show activity
-    if (currentTime - lastBlink >= 500) {
+    // Check for CRSF timeout
+    if (currentTime - lastCRSFFrame > CRSF_TIMEOUT_MS) {
+        if (!crsfTimeout) {
+            crsfTimeout = true;
+            Serial.println("⚠️  WARNING: CRSF frame timeout - check ExpressLRS connection");
+        }
+    }
+
+    // Blink LED to show activity (fast if timeout)
+    unsigned long blinkInterval = crsfTimeout ? 200 : 500;
+    if (currentTime - lastBlink >= blinkInterval) {
         lastBlink = currentTime;
         ledState = !ledState;
         digitalWrite(LED_PIN, ledState);
