@@ -1,6 +1,6 @@
 #include "CRSF.h"
 
-// CRC8 implementation for CRSF (DVB-S2 polynomial)
+// CRC8 DVB-S2 (poly 0xD5)
 static const uint8_t crc8_dvb_s2_table[256] = {
     0x00, 0xD5, 0x7F, 0xAA, 0xFE, 0x2B, 0x81, 0x54, 0x29, 0xFC, 0x56, 0x83, 0xD7, 0x02, 0xA8, 0x7D,
     0x52, 0x87, 0x2D, 0xF8, 0xAC, 0x79, 0xD3, 0x06, 0x7B, 0xAE, 0x04, 0xD1, 0x85, 0x50, 0xFA, 0x2F,
@@ -20,138 +20,178 @@ static const uint8_t crc8_dvb_s2_table[256] = {
     0x84, 0x51, 0xFB, 0x2E, 0x7A, 0xAF, 0x05, 0xD0, 0xAD, 0x78, 0xD2, 0x07, 0x53, 0x86, 0x2C, 0xF9
 };
 
-CRSF::CRSF() {
-    _serial = nullptr;
-    // Initialize all channels to middle value
-    for (int i = 0; i < CRSF_MAX_CHANNELS; i++) {
-        _channels[i] = CRSF_CHANNEL_VALUE_MID;
-    }
+static uint16_t be16(const uint8_t* p) { return (uint16_t)p[0] << 8 | p[1]; }
+static uint32_t be32(const uint8_t* p) {
+    return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3];
 }
 
-bool CRSF::begin(HardwareSerial &serial) {
+CRSF::CRSF() : _serial(nullptr), _rxPos(0) {
+    for (int i = 0; i < CRSF_MAX_CHANNELS; i++) _channels[i] = CRSF_CHANNEL_VALUE_MID;
+    memset(&_telem, 0, sizeof(_telem));
+}
+
+void CRSF::begin(HardwareSerial &serial) {
     _serial = &serial;
-    // Validate that serial pointer is valid
-    if (_serial == nullptr) {
-        return false;
-    }
-    return true;
 }
 
 void CRSF::setChannel(uint8_t channel, uint16_t value) {
-    if (channel < CRSF_MAX_CHANNELS) {
-        // Constrain value to valid range
-        if (value < CRSF_CHANNEL_VALUE_MIN) value = CRSF_CHANNEL_VALUE_MIN;
-        if (value > CRSF_CHANNEL_VALUE_MAX) value = CRSF_CHANNEL_VALUE_MAX;
-        _channels[channel] = value;
-    }
-}
-
-uint16_t CRSF::mapAnalogToCRSF(uint16_t analogValue) {
-    // Map from 0-4095 (12-bit ADC) to 172-1811 (CRSF range)
-    return map(analogValue, 0, 4095, CRSF_CHANNEL_VALUE_MIN, CRSF_CHANNEL_VALUE_MAX);
+    if (channel >= CRSF_MAX_CHANNELS) return;
+    _channels[channel] = constrain(value, CRSF_CHANNEL_VALUE_MIN, CRSF_CHANNEL_VALUE_MAX);
 }
 
 uint16_t CRSF::getChannel(uint8_t channel) {
-    if (channel < CRSF_MAX_CHANNELS) {
-        return _channels[channel];
-    }
-    return CRSF_CHANNEL_VALUE_MID;
+    return channel < CRSF_MAX_CHANNELS ? _channels[channel] : CRSF_CHANNEL_VALUE_MID;
+}
+
+uint16_t CRSF::mapAnalogToCRSF(uint16_t analogValue) {
+    return map(analogValue, 0, 4095, CRSF_CHANNEL_VALUE_MIN, CRSF_CHANNEL_VALUE_MAX);
 }
 
 uint8_t CRSF::crc8(const uint8_t *data, uint8_t len) {
     uint8_t crc = 0;
-    for (uint8_t i = 0; i < len; i++) {
-        crc = crc8_dvb_s2_table[crc ^ data[i]];
-    }
+    for (uint8_t i = 0; i < len; i++) crc = crc8_dvb_s2_table[crc ^ data[i]];
     return crc;
 }
 
 void CRSF::packChannels(uint8_t *buffer) {
-    // Pack 16 channels of 11 bits each into buffer
-    // Total: 16 * 11 = 176 bits = 22 bytes
-    
-    buffer[0]  = (uint8_t)(_channels[0] & 0x07FF);
-    buffer[1]  = (uint8_t)((_channels[0] & 0x07FF) >> 8 | (_channels[1] & 0x07FF) << 3);
-    buffer[2]  = (uint8_t)((_channels[1] & 0x07FF) >> 5 | (_channels[2] & 0x07FF) << 6);
-    buffer[3]  = (uint8_t)((_channels[2] & 0x07FF) >> 2);
-    buffer[4]  = (uint8_t)((_channels[2] & 0x07FF) >> 10 | (_channels[3] & 0x07FF) << 1);
-    buffer[5]  = (uint8_t)((_channels[3] & 0x07FF) >> 7 | (_channels[4] & 0x07FF) << 4);
-    buffer[6]  = (uint8_t)((_channels[4] & 0x07FF) >> 4 | (_channels[5] & 0x07FF) << 7);
-    buffer[7]  = (uint8_t)((_channels[5] & 0x07FF) >> 1);
-    buffer[8]  = (uint8_t)((_channels[5] & 0x07FF) >> 9 | (_channels[6] & 0x07FF) << 2);
-    buffer[9]  = (uint8_t)((_channels[6] & 0x07FF) >> 6 | (_channels[7] & 0x07FF) << 5);
-    buffer[10] = (uint8_t)((_channels[7] & 0x07FF) >> 3);
-    buffer[11] = (uint8_t)((_channels[8] & 0x07FF));
-    buffer[12] = (uint8_t)((_channels[8] & 0x07FF) >> 8 | (_channels[9] & 0x07FF) << 3);
-    buffer[13] = (uint8_t)((_channels[9] & 0x07FF) >> 5 | (_channels[10] & 0x07FF) << 6);
-    buffer[14] = (uint8_t)((_channels[10] & 0x07FF) >> 2);
-    buffer[15] = (uint8_t)((_channels[10] & 0x07FF) >> 10 | (_channels[11] & 0x07FF) << 1);
-    buffer[16] = (uint8_t)((_channels[11] & 0x07FF) >> 7 | (_channels[12] & 0x07FF) << 4);
-    buffer[17] = (uint8_t)((_channels[12] & 0x07FF) >> 4 | (_channels[13] & 0x07FF) << 7);
-    buffer[18] = (uint8_t)((_channels[13] & 0x07FF) >> 1);
-    buffer[19] = (uint8_t)((_channels[13] & 0x07FF) >> 9 | (_channels[14] & 0x07FF) << 2);
-    buffer[20] = (uint8_t)((_channels[14] & 0x07FF) >> 6 | (_channels[15] & 0x07FF) << 5);
-    buffer[21] = (uint8_t)((_channels[15] & 0x07FF) >> 3);
+    // 16 channels x 11 bits, little-endian bit order = 22 bytes
+    uint32_t acc = 0;
+    uint8_t bits = 0;
+    uint8_t pos = 0;
+    for (int i = 0; i < CRSF_MAX_CHANNELS; i++) {
+        acc |= (uint32_t)(_channels[i] & 0x07FF) << bits;
+        bits += 11;
+        while (bits >= 8) {
+            buffer[pos++] = acc & 0xFF;
+            acc >>= 8;
+            bits -= 8;
+        }
+    }
 }
 
-void CRSF::sendRCFrame() {
-    if (_serial == nullptr) {
-        return; // Silent fail - but should not happen if begin() was called
-    }
-
-    uint8_t frame[26];
-
-    // Frame structure:
-    // [0] = Sync byte (0xC8)
-    // [1] = Frame length (frame type + payload + crc)
-    // [2] = Frame type (0x16 for RC channels)
-    // [3-24] = 22 bytes of packed channel data
-    // [25] = CRC8
-
-    frame[0] = CRSF_SYNC_BYTE;
-    frame[1] = 24; // length of (frame type + payload + crc)
+void CRSF::buildRCFrame(uint8_t* frame) {
+    frame[0] = CRSF_ADDRESS_TRANSMITTER;
+    frame[1] = 24;  // type + 22 payload + crc
     frame[2] = CRSF_FRAMETYPE_RC_CHANNELS;
-
-    // Pack channels into frame
     packChannels(&frame[3]);
-
-    // Calculate CRC over frame type and payload (not including sync and length)
     frame[25] = crc8(&frame[2], 23);
-
-    // Send frame - use non-blocking write
-    // Note: write() is non-blocking, frames may be dropped if buffer full
-    _serial->write(frame, 26);
-    _serial->flush(); // Ensure frame is sent
 }
 
 void CRSF::sendRCFrame(uint8_t* captureBuffer) {
     if (_serial == nullptr) return;
+    uint8_t frame[CRSF_RC_FRAME_SIZE];
+    buildRCFrame(frame);
+    if (captureBuffer != nullptr) memcpy(captureBuffer, frame, sizeof(frame));
+    _serial->write(frame, sizeof(frame));
+}
 
-    uint8_t frame[26];
+void CRSF::sendDevicePing() {
+    if (_serial == nullptr) return;
+    uint8_t frame[6] = {CRSF_ADDRESS_TRANSMITTER, 4, CRSF_FRAMETYPE_DEVICE_PING,
+                        CRSF_ADDRESS_TRANSMITTER, CRSF_ADDRESS_RADIO, 0};
+    frame[5] = crc8(&frame[2], 3);
+    _serial->write(frame, sizeof(frame));
+}
 
-    // Frame structure:
-    // [0] = Sync byte (0xC8)
-    // [1] = Frame length (frame type + payload + crc)
-    // [2] = Frame type (0x16 for RC channels)
-    // [3-24] = 22 bytes of packed channel data
-    // [25] = CRC8
+void CRSF::processByte(uint8_t b, uint32_t nowMs) {
+    if (_rxPos == 0) {
+        if (b == CRSF_ADDRESS_RADIO || b == CRSF_SYNC_BYTE || b == CRSF_ADDRESS_TRANSMITTER) _rx[_rxPos++] = b;
+        return;
+    }
+    if (_rxPos == 1) {
+        if (b < 2 || b > CRSF_FRAME_SIZE_MAX - 2) {
+            _rxPos = 0;
+            return;
+        }
+        _rx[_rxPos++] = b;
+        return;
+    }
+    _rx[_rxPos++] = b;
+    const uint8_t len = _rx[1];
+    if (_rxPos < len + 2) return;
+    if (crc8(&_rx[2], len - 1) == _rx[len + 1]) {
+        _telem.goodFrames++;
+        handleFrame(nowMs);
+    } else {
+        _telem.badFrames++;
+    }
+    _rxPos = 0;
+}
 
-    frame[0] = CRSF_SYNC_BYTE;
-    frame[1] = 24; // length of (frame type + payload + crc)
-    frame[2] = CRSF_FRAMETYPE_RC_CHANNELS;
+void CRSF::handleFrame(uint32_t nowMs) {
+    const uint8_t type = _rx[2];
+    const uint8_t* p = &_rx[3];
+    const uint8_t len = _rx[1] - 2;
+    CRSFTelemetry& t = _telem;
+    t.lastFrameMs = nowMs;
 
-    // Pack channels into frame
-    packChannels(&frame[3]);
+    switch (type) {
+    case CRSF_FRAMETYPE_LINK_STATISTICS:
+        if (len < 10) return;
+        t.uplinkRssi1 = p[0];
+        t.uplinkRssi2 = p[1];
+        t.uplinkLq = p[2];
+        t.uplinkSnr = (int8_t)p[3];
+        t.activeAntenna = p[4];
+        t.rfMode = p[5];
+        t.txPower = p[6];
+        t.downlinkRssi = p[7];
+        t.downlinkLq = p[8];
+        t.downlinkSnr = (int8_t)p[9];
+        t.lastLinkMs = nowMs;
+        break;
 
-    // Calculate CRC over frame type and payload (not including sync and length)
-    frame[25] = crc8(&frame[2], 23);
+    case CRSF_FRAMETYPE_BATTERY_SENSOR:
+        if (len < 8) return;
+        t.batteryDv = be16(p);
+        t.currentDa = be16(p + 2);
+        t.capacityMah = (uint32_t)p[4] << 16 | (uint32_t)p[5] << 8 | p[6];
+        t.remainingPct = p[7];
+        t.lastBatteryMs = nowMs;
+        break;
 
-    // Copy to capture buffer if provided (for analysis)
-    if (captureBuffer != nullptr) {
-        memcpy(captureBuffer, frame, 26);
+    case CRSF_FRAMETYPE_ATTITUDE:
+        if (len < 6) return;
+        t.pitch = (int16_t)be16(p);
+        t.roll = (int16_t)be16(p + 2);
+        t.yaw = (int16_t)be16(p + 4);
+        t.lastAttitudeMs = nowMs;
+        break;
+
+    case CRSF_FRAMETYPE_GPS:
+        if (len < 15) return;
+        t.latitude = (int32_t)be32(p);
+        t.longitude = (int32_t)be32(p + 4);
+        t.groundSpeed = be16(p + 8);
+        t.heading = be16(p + 10);
+        t.altitude = be16(p + 12);
+        t.satellites = p[14];
+        t.lastGpsMs = nowMs;
+        break;
+
+    case CRSF_FRAMETYPE_FLIGHT_MODE: {
+        const size_t n = min((size_t)len, sizeof(t.flightMode) - 1);
+        memcpy(t.flightMode, p, n);
+        t.flightMode[n] = 0;
+        break;
     }
 
-    // Send frame - use non-blocking write
-    _serial->write(frame, 26);
-    _serial->flush(); // Ensure frame is sent
+    case CRSF_FRAMETYPE_DEVICE_INFO: {
+        // extended frame: dest, origin, null-terminated name, ...
+        if (len < 3) return;
+        const char* name = reinterpret_cast<const char*>(p + 2);
+        const size_t n = min(strnlen(name, len - 2), sizeof(t.deviceName) - 1);
+        memcpy(t.deviceName, name, n);
+        t.deviceName[n] = 0;
+        break;
+    }
+
+    case CRSF_FRAMETYPE_HANDSET:
+        // extended frame: dest, origin, subtype, rate (BE, 0.1us), offset (BE, 0.1us)
+        if (len < 11 || p[2] != CRSF_HANDSET_SUBCMD_TIMING) return;
+        t.syncPeriodUs = be32(p + 3) / 10;
+        t.syncOffsetUs = (int32_t)be32(p + 7) / 10;
+        t.lastSyncMs = nowMs;
+        break;
+    }
 }

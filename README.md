@@ -1,244 +1,143 @@
-# ESP32-C3 ExpressLRS Radio Controller
+# ELRSTx — Rádio controle ESP32 para módulo ExpressLRS
 
-Rádio controle simplificado baseado em ESP32-C3 DevKit com dois joysticks analógicos, comunicando via protocolo CRSF com transmissor ExpressLRS.
+Rádio com dois joysticks analógicos, quatro switches e um OLED, que controla um módulo **ExpressLRS TX** via CRSF.
 
-## 📋 Características
+## Recursos
 
-- ✅ Suporte para 2 joysticks analógicos (4 canais)
-- ✅ Protocolo CRSF para comunicação com ExpressLRS
-- ✅ Taxa de atualização de 50 Hz
-- ✅ Calibração e deadband configuráveis
-- ✅ Debug via Serial Monitor
-- ✅ Indicador LED de status
+- 4 eixos analógicos (AETR) + 4 switches AUX (CH5–CH8, AUX1 = arm)
+- CRSF a 400000 baud com **telemetria bidirecional**: link (RSSI/LQ/SNR/potência), bateria do modelo, atitude, GPS, modo de voo e nome do módulo
+- **Sincronização com o módulo**: envia na mesma taxa de pacotes do ELRS (ex.: 250 Hz), ou 50 Hz sem sync
+- Calibração por eixo, deadband, inversão e mapeamento de canais
+- **5 perfis de modelo** salvos na flash (NVS, com checksum)
+- **Segurança**: safe start (acelerador e arm bloqueados no boot até acelerador baixo + arm desligado), alarme de perda de link e de bateria baixa (LED + buzzer)
+- **Bateria do rádio** por divisor resistivo, com porcentagem para LiPo
+- **Display OLED 128x64** com menu: canais, telemetria, calibração, ajustes, perfis, WiFi/BLE e info
+- **WiFi AP** com página web de status, comandos e **atualização OTA**; também OTA pelo PlatformIO
+- **BLE UART** (Nordic UART Service) com os mesmos comandos da serial
 
-## 🔧 Hardware Necessário
+> **Failsafe:** quando o link cai, o rádio não consegue mais falar com o modelo. O comportamento do aeromodelo na perda de sinal é configurado no receptor/controladora de voo (ex.: Betaflight → Failsafe). O rádio cuida do safe start e dos alarmes.
 
-- **ESP32-C3 DevKit** (ou ESP32-C3-DevKitM-1)
-- **2x Joysticks Analógicos** (módulos com saída 0-3.3V)
-- **Módulo ExpressLRS TX** (com suporte a CRSF)
-- Cabos jumper para conexões
+## Placas suportadas
 
-## 📌 Pinout ESP32-C3
+| Placa | Ambiente | Botões/switches |
+|-------|----------|-----------------|
+| **ESP32 DevKit (ESP32-WROOM-32)** — padrão | `esp32dev` | direto nos GPIOs |
+| ESP32-C3 | `esp32-c3-devkitm-1` | expansor I2C PCF8574 |
 
-### Joysticks
+Pinagem completa das duas, comparação e a opção ESP32-S3: **[docs/HARDWARE.md](docs/HARDWARE.md)**.
 
-| Joystick | Eixo | Pino GPIO | Canal RC | Função |
-|----------|------|-----------|----------|--------|
-| Left (1) | X | GPIO 0 | CH1 | Roll (Aileron) |
-| Left (1) | Y | GPIO 1 | CH3 | Throttle |
-| Right (2) | X | GPIO 2 | CH4 | Yaw (Rudder) |
-| Right (2) | Y | GPIO 3 | CH2 | Pitch (Elevator) |
+## Hardware (DevKit)
 
-**Nota**: ESP32-C3 tem ADC1 em GPIO0-4 (ADC1_CH0 a ADC1_CH4)
+- ESP32 DevKit (ESP32-WROOM-32)
+- Módulo ExpressLRS TX com **UART de 2 pinos** (TX/RX separados)
+- 2 joysticks analógicos 3.3 V
+- 4 botões de menu + 4 switches (entre o pino e o GND)
+- OLED 0.96" SSD1306 128x64 I2C de 4 pinos (0x3C) — opcional
+- Divisor 100k/39k para a bateria (até ~11.7 V) — opcional
+- Buzzer ativo — opcional
 
-### CRSF (ExpressLRS)
+| GPIO | Função |
+|------|--------|
+| 36 / 39 | Joystick esquerdo X (Roll) / Y (Throttle) |
+| 34 / 35 | Joystick direito X (Yaw) / Y (Pitch) |
+| 32 | Bateria |
+| 21 / 22 | I2C SDA / SCL (OLED) |
+| 16 / 17 | CRSF RX ← TX do módulo / CRSF TX → RX do módulo |
+| 2 | LED da placa |
+| 25 | Buzzer |
+| 4 / 13 / 14 / 27 | Botões cima / baixo / OK / voltar |
+| 18 / 19 / 23 / 26 | AUX1 (arm) / AUX2 / AUX3 / AUX4 |
 
-| Função | Pino GPIO | Descrição |
-|--------|-----------|-----------|
-| TX | GPIO 21 | Transmite para ELRS (conecta ao RX do módulo) |
-| Baudrate | 420000 | Velocidade serial CRSF |
+O módulo detecta o baud automaticamente entre `400000, 115200, 921600, 1870000, ...`. **420000 não funciona** — essa é a velocidade entre receptor e controladora de voo.
 
-**Nota**: Apenas TX é necessário - comunicação unidirecional.
-
-### LED de Status
-
-| Função | Pino GPIO |
-|--------|-----------|
-| LED | GPIO 8 | LED interno do ESP32-C3 |
-
-## 🔌 Esquema de Conexão
-
-### Joysticks → ESP32-C3
-```
-Joystick 1 (Esquerdo):
-  VCC → 3.3V
-  GND → GND
-  VRx → GPIO 0
-  VRy → GPIO 1
-
-Joystick 2 (Direito):
-  VCC → 3.3V
-  GND → GND
-  VRx → GPIO 2
-  VRy → GPIO 3
-```
-
-**⚠️ IMPORTANTE**: Use joysticks compatíveis com 3.3V! O ESP32-C3 não tolera 5V nos pinos ADC.
-
-### ESP32-C3 → ExpressLRS TX
-```
-ESP32-C3       ELRS TX Module
-GPIO 21 (TX)  → RX (pino de dados do módulo)
-GND           → GND
-5V ou 3.3V    → VCC (conforme especificação do módulo)
-```
-
-**Nota**: O ExpressLRS TX module só precisa receber dados via CRSF. Não é necessário conectar o pino RX do ESP32-C3 ao TX do módulo, pois a comunicação é unidirecional (controlador → módulo → rádio).
-
-## 🚀 Como Usar
-
-### 1. Instalação do PlatformIO
-
-Se ainda não tem o PlatformIO instalado:
-- Instale a extensão PlatformIO IDE no VS Code
-
-### 2. Compilar e Upload
+## Compilar e gravar
 
 ```bash
-# No terminal do PlatformIO
-pio run -t upload
-
-# Ou use o botão "Upload" na barra inferior do VS Code
+pio run -t upload                         # ESP32 DevKit
+pio run -e esp32-c3-devkitm-1 -t upload   # ESP32-C3
+pio device monitor                        # 115200 baud
 ```
 
-### 3. Monitor Serial
+No primeiro boot, os testes unitários rodam e o resultado aparece no monitor. Desative `RUN_UNIT_TESTS` em [src/main.cpp](src/main.cpp) depois de conferir.
 
-```bash
-pio device monitor
+## Primeiros passos
 
-# Ou use o botão "Serial Monitor" no VS Code
-# Velocidade: 115200 baud
-```
+1. Grave o firmware e abra o monitor. A linha de status mostra `module ok` quando o módulo responde.
+2. Digite `status`. Se aparecer `NOT RESPONDING`, confira os fios RX/TX (cruzados), o GND e se o módulo está ligado.
+3. Calibre: `cal center` (sticks no centro), `cal start`, mova todos os sticks até o limite, `cal stop`. Ou use o menu **Calibrate**.
+4. Ligue o receptor: `status` deve mostrar LQ e RSSI.
+5. Abaixe o acelerador e desligue o AUX1 para liberar o safe start.
 
-### 4. Configuração do ExpressLRS
+## Display
 
-No seu módulo ExpressLRS TX:
-1. Configure para aceitar protocolo CRSF
-2. Conecte fisicamente os pinos RX/TX conforme o esquema
-3. Alimente o módulo (pode usar 5V do ESP32 ou fonte externa)
-
-## ⚙️ Configurações
-
-### Calibração dos Joysticks
-
-No arquivo `src/main.cpp`, ajuste os valores conforme seus joysticks:
-
-```cpp
-// Valores de calibração
-#define ADC_MIN         200     // Valor mínimo do ADC
-#define ADC_MAX         3895    // Valor máximo do ADC
-#define ADC_CENTER      2048    // Valor central
-#define DEADBAND        50      // Zona morta central
-```
-
-### Taxa de Atualização
-
-```cpp
-#define UPDATE_RATE     50      // Hz (padrão: 50 Hz)
-```
-
-### Mapeamento de Canais
-
-Você pode alterar o mapeamento no arquivo `src/main.cpp`:
-
-```cpp
-#define CH_ROLL         0   // Canal 1 - Aileron
-#define CH_PITCH        1   // Canal 2 - Elevator
-#define CH_THROTTLE     2   // Canal 3 - Throttle
-#define CH_YAW          3   // Canal 4 - Rudder
-```
-
-## 🎮 Modo de Simulação
-
-**Teste tudo ANTES de soldar os joysticks!**
-
-O projeto inclui um modo de simulação que gera movimentos suaves e naturais, permitindo validar:
-- ✅ Comunicação CRSF com ExpressLRS
-- ✅ Estrutura e integridade dos frames
-- ✅ Valores dos canais e conversões
-- ✅ Taxa de atualização (50 Hz)
-
-### Ativação Rápida
-
-No arquivo `src/main.cpp`:
-
-```cpp
-#define SIMULATION_MODE      // Movimentos simulados
-#define SHOW_CRSF_FRAMES     // Análise detalhada dos frames
-```
-
-**Comandos via Serial Monitor:**
-- `t` - Liga/desliga simulação em tempo real
-- `f` - Mostra análise completa do frame CRSF
-- `r` - Reinicia timer de simulação
-- `h` - Menu de ajuda
-
-Veja documentação completa em `docs/SIMULATION.md`
-
-## 🧪 Testes Unitários
-
-Para validar a saída CRSF, testes unitários foram implementados. Para executar:
-
-1. No arquivo `src/main.cpp`, descomente a linha:
-   ```cpp
-   #define RUN_UNIT_TESTS
-   ```
-
-2. Compile e faça upload
-
-3. Os testes serão executados no boot e validarão:
-   - Geração correta de pacotes CRSF
-   - Mapeamento de valores analógicos
-   - Cálculo de CRC8
-   - Estrutura dos frames
-
-Veja mais detalhes em `test/README_TESTS.md`
-
-## 📊 Protocolo CRSF
-
-O protocolo CRSF (Crossfire) é usado para comunicação de alta velocidade com o ExpressLRS:
-
-- **Baudrate**: 420000 bps
-- **Formato**: 8N1 (8 bits, sem paridade, 1 stop bit)
-- **Canais**: 16 canais de 11 bits cada (valores 172-1811)
-- **Valor central**: 992
-- **Taxa de frames**: configurável (padrão 50 Hz)
-
-## 🐛 Troubleshooting
-
-### Joysticks não respondem
-- Verifique as conexões VCC, GND e pinos analógicos
-- Use o monitor serial para ver valores raw
-- Ajuste valores de calibração se necessário
-
-### ExpressLRS não recebe sinal
-- Confirme baudrate (420000)
-- Verifique conexão TX/RX (atenção: TX→RX e RX→TX)
-- Verifique se o módulo ELRS está configurado para CRSF
-- Teste com firmware ELRS atualizado
-
-### Valores instáveis
-- Aumente o DEADBAND
-- Verifique alimentação estável (3.3V)
-- Use capacitores de desacoplamento nos joysticks
-
-## 📝 Estrutura do Projeto
+Tela inicial (botão OK abre o menu):
 
 ```
-elrxtx/
-├── include/
-│   └── CRSF.h              # Header da biblioteca CRSF
-├── src/
-│   ├── CRSF.cpp            # Implementação do protocolo CRSF
-│   └── main.cpp            # Código principal
-├── platformio.ini          # Configuração do PlatformIO
-└── README.md              # Este arquivo
+Model 1            7.6V   <- perfil e bateria do rádio
+ELRS 2.4G TX              <- nome do módulo (ou "No ELRS module")
+LQ 100%  -45dBm           <- link com o receptor
+250Hz  15.8V              <- taxa de envio e bateria do modelo
+[ THR DOWN + DISARM ]     <- alarme ativo, ou modo de voo
+[R===][P== ][T=  ][Y===]  <- posição dos 4 sticks
+   ■     □     □     □    <- AUX1..AUX4
 ```
 
-## 🔗 Referências
+Menu: **Channels** (barras e µs de CH1–8), **Telemetry** (RSSI/LQ/SNR, bateria, atitude, GPS, modo de voo), **Calibrate** (assistente em 2 passos), **Settings** (deadband, inversões, safe start, alarme de link, células e limites da bateria, simulação; grava ao sair), **Profiles** (5 modelos), **WiFi/BLE/OTA** (liga/desliga e mostra rede, senha e endereço) e **Info** (versão, frames, telemetria ok/ruim, memória, tempo ligado).
 
-- [ExpressLRS Documentation](https://www.expresslrs.org/)
-- [CRSF Protocol](https://github.com/ExpressLRS/ExpressLRS/wiki/CRSF-Protocol)
-- [ESP32 Arduino Core](https://github.com/espressif/arduino-esp32)
+## Comandos (Serial, BLE e web)
 
-## 📄 Licença
+```
+status                  módulo, link, bateria, taxa
+config                  configurações em JSON
+set <chave> <valor>     altera (na RAM); depois 'save'
+save                    grava na flash
+profile [0-4]           lista ou seleciona perfil
+defaults                volta aos padrões (não grava)
+cal [center|start|stop|cancel]
+sim [on|off]            simulação dos sticks (t alterna)
+frame                   último frame CRSF (f)
+wifi on|off             AP + página web + OTA
+ble on|off              BLE UART
+mon on|off              linha de status a cada segundo
+reboot
+```
 
-Este projeto é de código aberto e livre para uso pessoal e educacional.
+Chaves: `name`, `deadband`, `invert.<eixo>`, `map.<eixo>` (canal 1–4), `safestart`, `linkalarm`, `linktimeout`, `batt.ratio` ((R1+R2)/R2 × 1000), `batt.cells`, `batt.warn`, `batt.crit` (mV por célula), `cal.<eixo>` (`min,centro,max`), `wifipass`. Eixos: `roll pitch throttle yaw`.
 
-## 🤝 Contribuições
+## Configuração remota e OTA
 
-Contribuições são bem-vindas! Sinta-se à vontade para abrir issues ou pull requests.
+- **WiFi:** `wifi on` (ou menu WiFi/BLE/OTA). Conecte na rede `ELRSTx-XXXX` (senha padrão `elrstx1234`) e abra `http://192.168.4.1`. A página mostra o status, aceita comandos e faz upload do `firmware.bin`.
+- **OTA pelo PlatformIO:** com o AP ligado e o PC conectado nele, rode `pio run -e ota -t upload`.
+- **BLE:** `ble on` e conecte com um app de terminal BLE UART (ex.: nRF Connect, Serial Bluetooth Terminal). Mande os mesmos comandos.
 
----
+Deixe WiFi e BLE desligados durante o voo: eles usam 2.4 GHz, a mesma faixa dos módulos ELRS de 2.4 GHz.
 
-**Nota**: Este é um projeto educacional/hobby. Para uso em competições ou aplicações críticas, considere usar hardware profissional certificado.
+## LED de status
+
+| Padrão | Significado |
+|--------|-------------|
+| Aceso fixo | Link com o receptor |
+| Pisca lento (1 Hz) | Sem receptor |
+| Duas piscadas curtas por segundo | Aviso (sem módulo, safe start, bateria baixa) |
+| Pisca rápido (4 Hz) | Perda de link ou bateria crítica |
+| Aceso com uma falha curta por segundo | WiFi ou BLE ligado |
+
+Se o LED aparecer invertido, troque `LED_ACTIVE_LOW` em [include/Pins.h](include/Pins.h). Com `LED_IS_RGB 1`, um WS2812 mostra cores (verde = link, azul = sem receptor, amarelo = aviso, vermelho = alarme, roxo = WiFi/BLE).
+
+## Estrutura
+
+```
+include/Pins.h        pinagem por placa e parâmetros de hardware
+src/main.cpp          task de RC (timer) + loop da interface
+src/CRSF.cpp          protocolo: frames RC, ping, parser de telemetria
+src/Config.cpp        configurações e perfis na NVS
+src/Inputs.cpp        joysticks, simulação, bateria
+src/Safety.cpp        safe start e calibração
+src/State.cpp         estado compartilhado entre as tasks
+src/UI.cpp            OLED, menu, botões/switches, LED, buzzer, alarmes
+src/Commands.cpp      comandos de texto
+src/Remote.cpp        WiFi AP, web, OTA, BLE
+src/CRSFTest.cpp      testes do protocolo
+docs/HARDWARE.md      placas, pinagens e ligações
+docs/SIMULATION.md    modo de simulação
+```
