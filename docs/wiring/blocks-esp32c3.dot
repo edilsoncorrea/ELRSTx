@@ -1,0 +1,68 @@
+// Diagrama de blocos ELRSTx (ESP32-C3 + PCF8574). Gerar: dot -Tsvg blocks-esp32c3.dot -o blocks-esp32c3.svg
+digraph ELRSTx {
+    rankdir=LR;
+    graph [fontname="Helvetica", fontsize=12, nodesep=0.35, ranksep=0.7, bgcolor="white", pad=0.3];
+    node  [fontname="Helvetica", fontsize=11, shape=box, style="rounded,filled", fillcolor="#f2f2f2", color="#555555", margin="0.15,0.08"];
+    edge  [fontname="Helvetica", fontsize=9, color="#333333"];
+
+    subgraph cluster_power {
+        label="Alimentação"; style="rounded,dashed"; color="#c0392b"; fontcolor="#c0392b";
+        bat [label="Bateria\nLiPo 2S", fillcolor="#fde2e0"];
+        reg [label="Regulador 5V", fillcolor="#fde2e0"];
+        div [label="Divisor\n100k / 39k", fillcolor="#fde2e0"];
+    }
+
+    subgraph cluster_inputs {
+        label="Entradas"; style="rounded,dashed"; color="#2e86c1"; fontcolor="#2e86c1";
+        joyL [label="Joystick esquerdo\nRoll / Throttle", fillcolor="#dbeaf7"];
+        joyR [label="Joystick direito\nYaw / Pitch", fillcolor="#dbeaf7"];
+        btn  [label="4 botões de menu\ncima / baixo / OK / voltar", fillcolor="#dbeaf7"];
+        sw   [label="4 switches\nAUX1 (arm) .. AUX4", fillcolor="#dbeaf7"];
+    }
+
+    esp [label="ESP32-C3", fillcolor="#fff3c4", color="#b7950b", penwidth=2, fontsize=13, height=1.6, width=2];
+
+    subgraph cluster_outputs {
+        label="Interface"; style="rounded,dashed"; color="#7d3c98"; fontcolor="#7d3c98";
+        oled [label="OLED 0.96\nSSD1306", fillcolor="#ece1f3"];
+        buz  [label="Buzzer", fillcolor="#ece1f3"];
+        led  [label="LED da placa", fillcolor="#ece1f3"];
+    }
+
+    elrs [label="Módulo\nExpressLRS TX", fillcolor="#d5f5e3", color="#1e8449", penwidth=2];
+
+    subgraph cluster_model {
+        label="No modelo (sem fio)"; style="rounded,dashed"; color="#7f8c8d"; fontcolor="#7f8c8d";
+        rx [label="Receptor ELRS", fillcolor="#eeeeee"];
+        fc [label="Controladora de voo", fillcolor="#eeeeee"];
+    }
+
+    // alimentação
+    bat -> reg  [color="#c0392b", penwidth=2];
+    reg -> esp  [label="5V", color="#c0392b", fontcolor="#c0392b", penwidth=2];
+    reg -> elrs [label="5V / VCC do módulo", color="#c0392b", fontcolor="#c0392b", penwidth=2];
+    bat -> div  [color="#c0392b"];
+    div -> esp  [label="ADC  GPIO4", color="#c0392b", fontcolor="#c0392b"];
+
+    // entradas
+    joyL -> esp [label="ADC  GPIO0 / 1", color="#2e86c1", fontcolor="#2e86c1"];
+    joyR -> esp [label="ADC  GPIO2 / 3", color="#2e86c1", fontcolor="#2e86c1"];
+
+    pcf [label="Expansor I2C
+PCF8574 (0x20)", fillcolor="#dbeaf7"];
+    btn -> pcf [label="P0..P3", color="#2e86c1", fontcolor="#2e86c1"];
+    sw  -> pcf [label="P4..P7", color="#2e86c1", fontcolor="#2e86c1"];
+    pcf -> esp [label="I2C  GPIO5 / 6
+(mesmo barramento do OLED)", color="#7d3c98", fontcolor="#7d3c98", dir=both];
+
+    // link
+    esp -> elrs [label="CRSF 400000 baud\nTX GPIO21 → RX", color="#1e8449", fontcolor="#1e8449", penwidth=2];
+    elrs -> esp [label="telemetria\nTX → RX GPIO20", color="#1e8449", fontcolor="#1e8449", style=dashed];
+    elrs -> rx  [label="rádio 2.4 GHz / 900 MHz", dir=both, style=dashed, color="#7f8c8d", fontcolor="#7f8c8d"];
+    rx -> fc    [label="CRSF", color="#7f8c8d", fontcolor="#7f8c8d"];
+    // interface
+    esp -> oled [label="I2C  GPIO5 / 6", color="#7d3c98", fontcolor="#7d3c98"];
+    esp -> buz  [label="GPIO10", color="#7d3c98", fontcolor="#7d3c98"];
+    esp -> led  [label="GPIO8", color="#7d3c98", fontcolor="#7d3c98"];
+
+}

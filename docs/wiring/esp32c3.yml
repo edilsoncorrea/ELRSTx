@@ -1,0 +1,101 @@
+# Ligações do ELRSTx com ESP32-C3 + PCF8574. Gerar: wireviz -f ps docs/wiring/esp32c3.yml
+connectors:
+  BATERIA:
+    type: Bateria do rádio
+    subtype: ex. LiPo 2S
+    pinlabels: [BAT+, BAT-]
+  DIVISOR:
+    type: Divisor de tensão
+    notes: BAT+ -- 100k -- MEIO -- 39k -- GND
+    pinlabels: [BAT+, MEIO, GND]
+  FONTE_5V:
+    type: Regulador 5V
+    notes: Entrada na bateria. Ex. buck 5V
+    pinlabels: [5V, GND]
+  JOY_ESQ:
+    type: Joystick esquerdo
+    pinlabels: [GND, VCC, VRx Roll, VRy Throttle]
+  JOY_DIR:
+    type: Joystick direito
+    pinlabels: [GND, VCC, VRx Yaw, VRy Pitch]
+  BOTOES:
+    type: Botões do menu
+    notes: Um lado de cada botão no pino, o outro no comum
+    pinlabels: [Cima, Baixo, OK, Voltar, Comum]
+  SWITCHES:
+    type: Switches AUX
+    notes: Um lado de cada switch no pino, o outro no comum
+    pinlabels: [AUX1 arm, AUX2, AUX3, AUX4, Comum]
+  PCF8574:
+    type: Expansor I2C PCF8574
+    subtype: endereço 0x20
+    pinlabels: [P0, P1, P2, P3, P4, P5, P6, P7, GND, VCC, SDA, SCL]
+  ESP32C3:
+    type: ESP32-C3
+    notes: LED no GPIO8 (na placa)
+    pinlabels: [5V, 3V3, GND, GPIO0, GPIO1, GPIO2, GPIO3, GPIO4,
+                GPIO5, GPIO6, GPIO21, GPIO20, GPIO10]
+  OLED:
+    type: OLED 0.96 SSD1306
+    subtype: I2C 0x3C
+    pinlabels: [GND, VCC, SCL, SDA]
+  ELRS:
+    type: Módulo ExpressLRS TX
+    subtype: UART 400000 baud
+    notes: VCC conforme o módulo
+    pinlabels: [GND, VCC, RX, TX]
+  BUZZER:
+    type: Buzzer ativo
+    pinlabels: [BZ+, BZ-]
+
+cables:
+  W_BAT:      {category: bundle, wirecount: 2, colors: [RD, BK]}
+  W_DIV:      {category: bundle, wirecount: 2, colors: [WH, BK]}
+  W_FONTE_IN: {category: bundle, wirecount: 2, colors: [RD, BK]}
+  W_FONTE:    {category: bundle, wirecount: 2, colors: [RD, BK]}
+  W_JE:       {category: bundle, wirecount: 4, colors: [BK, RD, YE, GN]}
+  W_JD:       {category: bundle, wirecount: 4, colors: [BK, RD, BU, VT]}
+  W_BTN:      {category: bundle, wirecount: 5, colors: [OG, OG, OG, OG, BK]}
+  W_SW:       {category: bundle, wirecount: 5, colors: [WH, WH, WH, WH, BK]}
+  W_PCF:      {category: bundle, wirecount: 4, colors: [BK, RD, GN, YE]}
+  W_OLED:     {category: bundle, wirecount: 4, colors: [BK, RD, YE, GN]}
+  W_ELRS:     {category: bundle, wirecount: 4, colors: [BK, RD, YE, GN]}
+  W_BUZ:      {category: bundle, wirecount: 2, colors: [RD, BK]}
+
+connections:
+  - - BATERIA: [BAT+, BAT-]
+    - W_BAT: [1-2]
+    - DIVISOR: [BAT+, GND]
+  - - DIVISOR: [MEIO, GND]
+    - W_DIV: [1-2]
+    - ESP32C3: [GPIO4, GND]
+  - - BATERIA: [BAT+, BAT-]
+    - W_FONTE_IN: [1-2]
+    - FONTE_5V: [5V, GND]
+  - - FONTE_5V: [5V, GND]
+    - W_FONTE: [1-2]
+    - ESP32C3: [5V, GND]
+  - - JOY_ESQ: [GND, VCC, VRx Roll, VRy Throttle]
+    - W_JE: [1-4]
+    - ESP32C3: [GND, 3V3, GPIO0, GPIO1]
+  - - JOY_DIR: [GND, VCC, VRx Yaw, VRy Pitch]
+    - W_JD: [1-4]
+    - ESP32C3: [GND, 3V3, GPIO2, GPIO3]
+  - - BOTOES: [Cima, Baixo, OK, Voltar, Comum]
+    - W_BTN: [1-5]
+    - PCF8574: [P0, P1, P2, P3, GND]
+  - - SWITCHES: [AUX1 arm, AUX2, AUX3, AUX4, Comum]
+    - W_SW: [1-5]
+    - PCF8574: [P4, P5, P6, P7, GND]
+  - - PCF8574: [GND, VCC, SDA, SCL]
+    - W_PCF: [1-4]
+    - ESP32C3: [GND, 3V3, GPIO5, GPIO6]
+  - - ESP32C3: [GND, 3V3, GPIO6, GPIO5]
+    - W_OLED: [1-4]
+    - OLED: [GND, VCC, SCL, SDA]
+  - - ESP32C3: [GND, 5V, GPIO21, GPIO20]
+    - W_ELRS: [1-4]
+    - ELRS: [GND, VCC, RX, TX]
+  - - ESP32C3: [GPIO10, GND]
+    - W_BUZ: [1-2]
+    - BUZZER: [BZ+, BZ-]

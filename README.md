@@ -26,6 +26,8 @@ Rádio com dois joysticks analógicos, quatro switches e um OLED, que controla u
 
 Pinagem completa das duas, comparação e a opção ESP32-S3: **[docs/HARDWARE.md](docs/HARDWARE.md)**.
 
+![Esquemático ESP32 DevKit](docs/wiring/schematic-esp32dev.svg)
+
 ## Hardware (DevKit)
 
 - ESP32 DevKit (ESP32-WROOM-32)

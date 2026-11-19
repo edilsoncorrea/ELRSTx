@@ -1,0 +1,63 @@
+// Diagrama de blocos ELRSTx (ESP32 DevKit). Gerar: dot -Tsvg blocks-esp32dev.dot -o blocks-esp32dev.svg
+digraph ELRSTx {
+    rankdir=LR;
+    graph [fontname="Helvetica", fontsize=12, nodesep=0.35, ranksep=0.7, bgcolor="white", pad=0.3];
+    node  [fontname="Helvetica", fontsize=11, shape=box, style="rounded,filled", fillcolor="#f2f2f2", color="#555555", margin="0.15,0.08"];
+    edge  [fontname="Helvetica", fontsize=9, color="#333333"];
+
+    subgraph cluster_power {
+        label="Alimentação"; style="rounded,dashed"; color="#c0392b"; fontcolor="#c0392b";
+        bat [label="Bateria\nLiPo 2S", fillcolor="#fde2e0"];
+        reg [label="Regulador 5V", fillcolor="#fde2e0"];
+        div [label="Divisor\n100k / 39k", fillcolor="#fde2e0"];
+    }
+
+    subgraph cluster_inputs {
+        label="Entradas"; style="rounded,dashed"; color="#2e86c1"; fontcolor="#2e86c1";
+        joyL [label="Joystick esquerdo\nRoll / Throttle", fillcolor="#dbeaf7"];
+        joyR [label="Joystick direito\nYaw / Pitch", fillcolor="#dbeaf7"];
+        btn  [label="4 botões de menu\ncima / baixo / OK / voltar", fillcolor="#dbeaf7"];
+        sw   [label="4 switches\nAUX1 (arm) .. AUX4", fillcolor="#dbeaf7"];
+    }
+
+    esp [label="ESP32 DevKit\nESP32-WROOM-32", fillcolor="#fff3c4", color="#b7950b", penwidth=2, fontsize=13, height=1.6, width=2];
+
+    elrs [label="Módulo\nExpressLRS TX", fillcolor="#d5f5e3", color="#1e8449", penwidth=2];
+    subgraph cluster_outputs {
+        label="Interface"; style="rounded,dashed"; color="#7d3c98"; fontcolor="#7d3c98";
+        oled [label="OLED 0.96\nSSD1306", fillcolor="#ece1f3"];
+        buz  [label="Buzzer", fillcolor="#ece1f3"];
+        led  [label="LED da placa", fillcolor="#ece1f3"];
+    }
+
+
+    subgraph cluster_model {
+        label="No modelo (sem fio)"; style="rounded,dashed"; color="#7f8c8d"; fontcolor="#7f8c8d";
+        rx [label="Receptor ELRS", fillcolor="#eeeeee"];
+        fc [label="Controladora de voo", fillcolor="#eeeeee"];
+    }
+
+    // alimentação
+    bat -> reg  [color="#c0392b", penwidth=2];
+    reg -> esp  [label="5V (VIN)", color="#c0392b", fontcolor="#c0392b", penwidth=2];
+    reg -> elrs [label="5V / VCC do módulo", color="#c0392b", fontcolor="#c0392b", penwidth=2];
+    bat -> div  [color="#c0392b"];
+    div -> esp  [label="ADC  GPIO32", color="#c0392b", fontcolor="#c0392b"];
+
+    // entradas
+    joyL -> esp [label="ADC  GPIO36 / 39", color="#2e86c1", fontcolor="#2e86c1"];
+    joyR -> esp [label="ADC  GPIO34 / 35", color="#2e86c1", fontcolor="#2e86c1"];
+    btn  -> esp [label="GPIO 4 / 13 / 14 / 27", color="#2e86c1", fontcolor="#2e86c1"];
+    sw   -> esp [label="GPIO 18 / 19 / 23 / 26", color="#2e86c1", fontcolor="#2e86c1"];
+
+    // link
+    esp -> elrs [label="CRSF 400000 baud\nTX GPIO17 → RX", color="#1e8449", fontcolor="#1e8449", penwidth=2];
+    elrs -> esp [label="telemetria\nTX → RX GPIO16", color="#1e8449", fontcolor="#1e8449", style=dashed];
+    elrs -> rx  [label="rádio 2.4 GHz / 900 MHz", dir=both, style=dashed, color="#7f8c8d", fontcolor="#7f8c8d"];
+    rx -> fc    [label="CRSF", color="#7f8c8d", fontcolor="#7f8c8d"];
+    // interface
+    esp -> oled [label="I2C  GPIO21 / 22", color="#7d3c98", fontcolor="#7d3c98"];
+    esp -> buz  [label="GPIO25", color="#7d3c98", fontcolor="#7d3c98"];
+    esp -> led  [label="GPIO2", color="#7d3c98", fontcolor="#7d3c98"];
+
+}
