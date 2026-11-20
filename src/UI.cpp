@@ -1,82 +1,17 @@
 #include "UI.h"
 #include <Wire.h>
-#include <Adafruit_GFX.h>
 #include "Commands.h"
 #include "Config.h"
+#include "Display.h"
 #include "Inputs.h"
 #include "Pins.h"
 #include "Safety.h"
 #include "State.h"
 #include "ElrsParams.h"
 
-#if DISPLAY_TYPE == DISPLAY_SSD1306
-#include <Adafruit_SSD1306.h>
-#elif DISPLAY_TYPE == DISPLAY_ST7789
-#include <SPI.h>
-#include <Adafruit_ST7789.h>
-#endif
-
 namespace {
 
-constexpr uint16_t COLOR_ON = 1;
-constexpr uint16_t COLOR_OFF = 0;
-
-#if DISPLAY_TYPE == DISPLAY_SSD1306
-Adafruit_SSD1306 oled(128, 64, &Wire, -1, 400000UL, 400000UL);
-Adafruit_GFX& gfx = oled;
-#else
-// The UI is laid out for 128x64; other panels get this 1-bit canvas scaled up
-GFXcanvas1 canvas(128, 64);
-Adafruit_GFX& gfx = canvas;
-#endif
-
-#if DISPLAY_TYPE == DISPLAY_ST7789
-Adafruit_ST7789 tft(&SPI, -1, PIN_TFT_DC, PIN_TFT_RST);
-constexpr int16_t TFT_SIZE = 240;
-constexpr int16_t TFT_VIEW_H = 120;  // 64 * 240 / 128, centred vertically
-constexpr uint16_t TFT_FG = ST77XX_WHITE;
-constexpr uint16_t TFT_BG = ST77XX_BLACK;
-#endif
-
 bool displayFound = false;
-
-bool displayBegin() {
-#if DISPLAY_TYPE == DISPLAY_SSD1306
-    Wire.beginTransmission(I2C_ADDR_OLED);
-    return Wire.endTransmission() == 0 && oled.begin(SSD1306_SWITCHCAPVCC, I2C_ADDR_OLED, true, false);
-#elif DISPLAY_TYPE == DISPLAY_ST7789
-    SPI.begin(PIN_TFT_SCLK, -1, PIN_TFT_MOSI, -1);
-    tft.init(TFT_SIZE, TFT_SIZE, SPI_MODE3);  // 240x240 modules without a CS pin need mode 3
-    tft.setSPISpeed(40000000);
-    tft.setRotation(TFT_ROTATION);
-    tft.fillScreen(TFT_BG);
-    return true;  // write-only bus, presence cannot be detected
-#else
-    return false;
-#endif
-}
-
-void present() {
-#if DISPLAY_TYPE == DISPLAY_SSD1306
-    oled.display();
-#elif DISPLAY_TYPE == DISPLAY_ST7789
-    static uint16_t line[TFT_SIZE];
-    static uint8_t srcX[TFT_SIZE];
-    static bool mapped = false;
-    if (!mapped) {
-        for (int16_t x = 0; x < TFT_SIZE; x++) srcX[x] = x * 128 / TFT_SIZE;
-        mapped = true;
-    }
-    tft.startWrite();
-    tft.setAddrWindow(0, (TFT_SIZE - TFT_VIEW_H) / 2, TFT_SIZE, TFT_VIEW_H);
-    for (int16_t y = 0; y < TFT_VIEW_H; y++) {
-        const int16_t sy = y * 64 / TFT_VIEW_H;
-        for (int16_t x = 0; x < TFT_SIZE; x++) line[x] = canvas.getPixel(srcX[x], sy) ? TFT_FG : TFT_BG;
-        tft.writePixels(line, TFT_SIZE);
-    }
-    tft.endWrite();
-#endif
-}
 bool expOk = false;
 
 enum Screen : uint8_t { HOME, MENU, ELRS, CHANNELS, TELEMETRY, CALIBRATE, SETTINGS, PROFILES, REMOTE, INFO };
@@ -444,220 +379,94 @@ void handleButtons(uint8_t pressed) {
     }
 }
 
-// ---------- drawing ----------
+// ---------- views (what to show; Display::* decides how) ----------
 
-void text(int16_t x, int16_t y, const String& s) {
-    gfx.setCursor(x, y);
-    gfx.print(s);
-}
+void copy(char* dst, size_t size, const String& s) { strlcpy(dst, s.c_str(), size); }
 
-void header(const char* title) {
-    text(0, 0, title);
-    gfx.drawFastHLine(0, 9, 128, COLOR_ON);
-}
-
-float channelFraction(uint16_t v) {
-    return constrain((v - CRSF_CHANNEL_VALUE_MIN) / float(CRSF_CHANNEL_VALUE_MAX - CRSF_CHANNEL_VALUE_MIN), 0.0f, 1.0f);
-}
-
-void bar(int16_t x, int16_t y, int16_t w, int16_t h, float f) {
-    gfx.drawRect(x, y, w, h, COLOR_ON);
-    gfx.fillRect(x + 1, y + 1, (int16_t)((w - 2) * f), h - 2, COLOR_ON);
-}
-
-void drawList(const char* title, uint8_t count, String (*item)(uint8_t)) {
-    header(title);
-    if (cursor < scroll) scroll = cursor;
-    if (cursor >= scroll + 6) scroll = cursor - 5;
-    for (uint8_t row = 0; row < 6 && scroll + row < count; row++) {
-        const uint8_t i = scroll + row;
-        const int16_t y = 12 + row * 9;
-        if (i == cursor) {
-            gfx.fillRect(0, y - 1, 128, 9, COLOR_ON);
-            gfx.setTextColor(COLOR_OFF);
-        }
-        text(2, y, item(i));
-        gfx.setTextColor(COLOR_ON);
-    }
-}
-
-void drawHome() {
-    char buf[24];
+void showHome() {
+    using namespace Display;
     String title = cfg.model.name;
     if (cfg.model.simulation) title += " SIM";
-    text(0, 0, title);
+
+    HomeView v = {};
+    v.title = title.c_str();
     if (st.txBatteryMv > 1000) {
-        snprintf(buf, sizeof(buf), "%.1fV", st.txBatteryMv / 1000.0f);
-        text(128 - strlen(buf) * 6, 0, buf);
+        v.txBatteryMv = st.txBatteryMv;
+        const uint16_t cellMv = st.txBatteryMv / cfg.hw.battCells;
+        v.txBatteryLevel = cellMv < cfg.hw.battCritMv ? Level::Crit : cellMv < cfg.hw.battWarnMv ? Level::Warn : Level::None;
     }
-    gfx.drawFastHLine(0, 9, 128, COLOR_ON);
-
-    if (!State::moduleAlive(st, nowMs)) text(0, 12, "No ELRS module");
-    else text(0, 12, st.telem.deviceName[0] ? st.telem.deviceName : "ELRS module OK");
-
-    if (linkUp()) snprintf(buf, sizeof(buf), "LQ %3u%%  -%udBm", st.telem.uplinkLq, st.telem.uplinkRssi1);
-    else snprintf(buf, sizeof(buf), "No receiver link");
-    text(0, 21, buf);
-
-    String rate = String(1000000UL / st.periodUs) + "Hz";
-    if (!State::syncActive(st, nowMs)) rate += " nosync";
-    if (State::fresh(st.telem.lastBatteryMs, nowMs, 5000)) rate += "  " + String(st.telem.batteryDv / 10.0f, 1) + "V";
-    text(0, 30, rate);
-
-    if (alarmLevel != ALARM_NONE) {
-        gfx.fillRect(0, 38, 128, 10, COLOR_ON);
-        gfx.setTextColor(COLOR_OFF);
-        text(2, 39, alarmText);
-        gfx.setTextColor(COLOR_ON);
-    } else if (st.telem.flightMode[0]) {
-        text(0, 39, st.telem.flightMode);
+    v.moduleAlive = State::moduleAlive(st, nowMs);
+    v.deviceName = st.telem.deviceName;
+    v.link = linkUp();
+    v.lq = st.telem.uplinkLq;
+    v.rssi = st.telem.uplinkRssi1;
+    v.rateHz = 1000000UL / st.periodUs;
+    v.synced = State::syncActive(st, nowMs);
+    v.rxBatteryValid = State::fresh(st.telem.lastBatteryMs, nowMs, 5000);
+    v.rxBatteryDv = st.telem.batteryDv;
+    v.alarm = alarmLevel == ALARM_CRIT ? Level::Crit : alarmLevel == ALARM_WARN ? Level::Warn : Level::None;
+    v.alarmText = alarmText;
+    v.flightMode = st.telem.flightMode;
+    for (uint8_t a = 0; a < AXIS_COUNT; a++) {
+        v.axisLetter[a] = toupper(Config::axisName(a)[0]);
+        v.stick[a] = Display::channelFraction(st.channels[cfg.model.channel[a]]);
     }
-
-    for (uint8_t a = 0; a < AXIS_COUNT; a++) bar(a * 32, 50, 30, 6, channelFraction(st.channels[cfg.model.channel[a]]));
-    for (uint8_t i = 0; i < AUX_COUNT; i++) {
-        const bool on = st.channels[AUX_FIRST_CHANNEL + i] > CRSF_CHANNEL_VALUE_MID;
-        if (on) gfx.fillRect(i * 32 + 11, 58, 8, 6, COLOR_ON);
-        else gfx.drawRect(i * 32 + 11, 58, 8, 6, COLOR_ON);
-    }
+    for (uint8_t i = 0; i < AUX_COUNT; i++) v.aux[i] = st.channels[AUX_FIRST_CHANNEL + i] > CRSF_CHANNEL_VALUE_MID;
+    Display::home(v);
 }
 
-void drawChannels() {
-    char buf[8];
-    for (uint8_t i = 0; i < 8; i++) {
-        const int16_t y = i * 8;
-        snprintf(buf, sizeof(buf), "%u", i + 1);
-        text(0, y, buf);
-        bar(10, y + 1, 84, 6, channelFraction(st.channels[i]));
-        snprintf(buf, sizeof(buf), "%4d", ((int)st.channels[i] - CRSF_CHANNEL_VALUE_MID) * 5 / 8 + 1500);
-        text(100, y, buf);
-    }
+void showList(const char* title, uint8_t count, void (*row)(uint8_t, Display::Row&), bool busy = false) {
+    Display::ListView v = {title, count, cursor, editing, busy, row};
+    Display::list(v);
 }
 
-void drawTelemetry() {
-    const CRSFTelemetry& t = st.telem;
-    char buf[24];
-    header("Telemetry");
-    if (linkUp()) {
-        snprintf(buf, sizeof(buf), "Up -%u/-%u LQ%u", t.uplinkRssi1, t.uplinkRssi2, t.uplinkLq);
-        text(0, 12, buf);
-        snprintf(buf, sizeof(buf), "SNR %d  Dn -%u LQ%u", t.uplinkSnr, t.downlinkRssi, t.downlinkLq);
-        text(0, 21, buf);
-    } else {
-        text(0, 12, "No receiver link");
-    }
-    if (State::fresh(t.lastBatteryMs, nowMs, 5000)) {
-        snprintf(buf, sizeof(buf), "%.1fV %.1fA %lumAh", t.batteryDv / 10.0f, t.currentDa / 10.0f, (unsigned long)t.capacityMah);
-        text(0, 30, buf);
-    }
-    if (State::fresh(t.lastAttitudeMs, nowMs, 5000)) {
-        snprintf(buf, sizeof(buf), "P%d R%d Y%d", (int)(t.pitch * 0.0057296f), (int)(t.roll * 0.0057296f),
-                 (int)(t.yaw * 0.0057296f));
-        text(0, 39, buf);
-    }
-    if (State::fresh(t.lastGpsMs, nowMs, 5000)) {
-        snprintf(buf, sizeof(buf), "GPS %u sats %dm", t.satellites, (int)t.altitude - 1000);
-        text(0, 48, buf);
-    }
-    if (t.flightMode[0]) text(0, 57, t.flightMode);
+void menuRow(uint8_t i, Display::Row& r) { copy(r.label, sizeof(r.label), MENU_LABELS[i]); }
+
+void settingRow(uint8_t i, Display::Row& r) {
+    copy(r.label, sizeof(r.label), SETTING_LABELS[i]);
+    copy(r.value, sizeof(r.value), settingValue(i));
 }
 
-void drawCalibrate() {
-    header("Calibrate");
-    if (calStep == 0) {
-        text(0, 14, "1. Center all sticks");
-        text(0, 23, "   then press OK");
-        text(0, 50, "BACK = cancel");
-        return;
-    }
-    if (calStep == 1) {
-        text(0, 12, "2. Move all sticks to");
-        text(0, 21, "their limits, then OK");
-        char buf[24];
-        for (uint8_t a = 0; a < AXIS_COUNT; a++) {
-            const AxisCal c = Calibration::range(a);
-            snprintf(buf, sizeof(buf), "%c %4u %4u %4u", toupper(Config::axisName(a)[0]), c.min, st.raw[a], c.max);
-            text(0, 30 + a * 8, buf);
-        }
-        return;
-    }
-    text(0, 20, calResult);
-    text(0, 50, "Press any key");
+void profileRow(uint8_t i, Display::Row& r) {
+    copy(r.label, sizeof(r.label), String(i) + " " + profileNames[i] + (i == cfg.profile ? " *" : ""));
 }
 
-void drawRemote() {
-    header("WiFi / OTA");
-    gfx.fillRect(0, 11, 128, 9, COLOR_ON);
-    gfx.setTextColor(COLOR_OFF);
-    text(2, 12, String("WiFi AP: ") + (Remote::wifiActive() ? "ON" : "off"));
-    gfx.setTextColor(COLOR_ON);
-    if (Remote::wifiActive()) {
-        text(0, 30, Remote::ssid());
-        text(0, 39, String("pw ") + cfg.hw.wifiPass);
-        text(0, 48, "http://192.168.4.1");
-    } else {
-        text(0, 30, "OK = turn WiFi on");
-    }
-}
-
-void drawInfo() {
-    char buf[24];
-    header("Info");
-    text(0, 12, "FW " FW_VERSION);
-    snprintf(buf, sizeof(buf), "Frames %lu", (unsigned long)st.frames);
-    text(0, 21, buf);
-    snprintf(buf, sizeof(buf), "Telem %lu/%lu bad", (unsigned long)st.telem.goodFrames, (unsigned long)st.telem.badFrames);
-    text(0, 30, buf);
-    snprintf(buf, sizeof(buf), "Heap %lu", (unsigned long)ESP.getFreeHeap());
-    text(0, 39, buf);
-#if INPUTS_VIA_EXPANDER
-    text(0, 48, String("Expander ") + (expOk ? "ok" : "MISSING"));
-#else
-    text(0, 48, "Inputs: GPIO");
-#endif
-    snprintf(buf, sizeof(buf), "Up %lus", (unsigned long)(nowMs / 1000));
-    text(0, 57, buf);
-}
-
-String menuItem(uint8_t i) { return MENU_LABELS[i]; }
-
-String settingItem(uint8_t i) {
-    String v = settingValue(i);
-    if (editing && i == cursor) v = "<" + v + ">";
-    String l = SETTING_LABELS[i];
-    while (l.length() + v.length() < 20) l += ' ';
-    return l + v;
-}
-
-String profileItem(uint8_t i) { return String(i) + " " + profileNames[i] + (i == cfg.profile ? " *" : ""); }
-
-String elrsItem(uint8_t i) {
+void elrsRow(uint8_t i, Display::Row& r) {
     using namespace ElrsParams;
     Param p;
-    if (!param(elrsIds[i], p)) return "";
-    String name = p.name;
-    if (p.type == T_COMMAND) return "[" + name.substring(0, 18) + "]";
-    const bool edited = editing && i == cursor;
-    String v = p.type == T_FOLDER ? String(">") : valueText(p, edited ? elrsEditValue : p.value);
-    if (v.length() > 11) v = v.substring(0, 11);
-    if (edited) v = "<" + v + ">";
-    const int room = 20 - (int)v.length() - 1;
-    if ((int)name.length() > room) name = name.substring(0, max(room, 0));
-    while (name.length() + v.length() < 20) name += ' ';
-    return name + v;
+    if (!param(elrsIds[i], p)) return;
+    copy(r.label, sizeof(r.label), p.name);
+    r.folder = p.type == T_FOLDER;
+    r.command = p.type == T_COMMAND;
+    if (!r.folder && !r.command) {
+        const bool edited = editing && i == cursor;
+        copy(r.value, sizeof(r.value), valueText(p, edited ? elrsEditValue : p.value));
+    }
 }
 
-void drawElrs() {
+void showMessage(const char* title, std::initializer_list<const char*> lines, const char* footer = nullptr,
+                 int8_t highlight = -1) {
+    Display::MessageView v = {};
+    v.title = title;
+    uint8_t n = 0;
+    for (const char* l : lines) {
+        if (n < Display::MESSAGE_LINES) v.line[n++] = l;
+    }
+    v.highlight = highlight;
+    v.footer = footer;
+    Display::message(v);
+}
+
+void showElrs() {
     using namespace ElrsParams;
     const Status s = status();
     if (elrsCmdId) {
         Param p;
         param(elrsCmdId, p);
-        header(p.name);
-        text(0, 14, p.text[0] ? p.text : "...");
-        const char* hint = p.value == CMD_ASK_CONFIRM ? "OK=confirm BACK=no"
-                         : p.value == CMD_EXECUTING   ? "Running.. BACK=stop"
+        const char* hint = p.value == CMD_ASK_CONFIRM ? "OK=yes BACK=no"
+                         : p.value == CMD_EXECUTING   ? "BACK=stop"
                                                       : "OK=close";
-        text(0, 56, hint);
+        showMessage(p.name, {p.text[0] ? p.text : "..."}, hint);
         return;
     }
     String title = "ExpressLRS";
@@ -666,35 +475,97 @@ void drawElrs() {
     if (!elrsFolder && s.message[0]) title = s.message;
     if (title.length() > 15) title = title.substring(0, 15);
     if (!s.fieldCount) {
-        header(title.c_str());
-        text(0, 14, "Waiting for module");
-        text(0, 23, "check CRSF wiring");
+        showMessage(title.c_str(), {"Waiting for module", "check CRSF wiring"});
         return;
     }
     if (!elrsCount) {
-        header(title.c_str());
-        text(0, 14, String("Loading ") + s.loadedCount + "/" + s.fieldCount);
+        const String loading = String("Loading ") + s.loadedCount + "/" + s.fieldCount;
+        showMessage(title.c_str(), {loading.c_str()});
         return;
     }
-    drawList(title.c_str(), elrsCount, elrsItem);
-    if (s.loading) text(122, 0, "*");
+    showList(title.c_str(), elrsCount, elrsRow, s.loading);
+}
+
+void showTelemetry() {
+    const CRSFTelemetry& t = st.telem;
+    Display::TelemetryView v = {};
+    v.link = linkUp();
+    v.snr = t.uplinkSnr;
+    v.rssi1 = t.uplinkRssi1;
+    v.rssi2 = t.uplinkRssi2;
+    v.lq = t.uplinkLq;
+    v.downRssi = t.downlinkRssi;
+    v.downLq = t.downlinkLq;
+    v.battery = State::fresh(t.lastBatteryMs, nowMs, 5000);
+    v.batteryDv = t.batteryDv;
+    v.currentDa = t.currentDa;
+    v.capacityMah = t.capacityMah;
+    v.attitude = State::fresh(t.lastAttitudeMs, nowMs, 5000);
+    v.pitchDeg = t.pitch * 0.0057296f;  // 1/10000 rad -> degrees
+    v.rollDeg = t.roll * 0.0057296f;
+    v.yawDeg = t.yaw * 0.0057296f;
+    v.gps = State::fresh(t.lastGpsMs, nowMs, 5000);
+    v.satellites = t.satellites;
+    v.altitudeM = (int)t.altitude - 1000;
+    v.flightMode = t.flightMode;
+    Display::telemetry(v);
+}
+
+void showCalibrate() {
+    if (calStep == 0) {
+        showMessage("Calibrate", {"1. Center sticks", "   then press OK"}, "BACK = cancel");
+        return;
+    }
+    if (calStep == 1) {
+        char axis[AXIS_COUNT][20];
+        for (uint8_t a = 0; a < AXIS_COUNT; a++) {
+            const AxisCal c = Calibration::range(a);
+            snprintf(axis[a], sizeof(axis[a]), "%c %4u %4u %4u", toupper(Config::axisName(a)[0]), c.min, st.raw[a], c.max);
+        }
+        showMessage("Calibrate", {"2. Move to limits", "   then press OK", axis[0], axis[1], axis[2], axis[3]});
+        return;
+    }
+    showMessage("Calibrate", {calResult.c_str()}, "Press any key");
+}
+
+void showRemote() {
+    const String state = String("WiFi AP: ") + (Remote::wifiActive() ? "ON" : "off");
+    if (Remote::wifiActive()) {
+        const String ssid = Remote::ssid();
+        const String pass = String("pw ") + cfg.hw.wifiPass;
+        showMessage("WiFi / OTA", {state.c_str(), nullptr, ssid.c_str(), pass.c_str(), "http://192.168.4.1"}, nullptr, 0);
+    } else {
+        showMessage("WiFi / OTA", {state.c_str(), nullptr, "OK = turn WiFi on"}, nullptr, 0);
+    }
+}
+
+void showInfo() {
+    char frames[24], telem[24], heap[24], up[24];
+    snprintf(frames, sizeof(frames), "Frames %lu", (unsigned long)st.frames);
+    snprintf(telem, sizeof(telem), "Telem %lu/%lu bad", (unsigned long)st.telem.goodFrames, (unsigned long)st.telem.badFrames);
+    snprintf(heap, sizeof(heap), "Heap %lu", (unsigned long)ESP.getFreeHeap());
+    snprintf(up, sizeof(up), "Up %lus", (unsigned long)(nowMs / 1000));
+#if INPUTS_VIA_EXPANDER
+    const char* inputs = expOk ? "Expander ok" : "Expander MISSING";
+#else
+    const char* inputs = "Inputs: GPIO";
+#endif
+    showMessage("Info", {"FW " FW_VERSION, frames, telem, heap, inputs, up});
 }
 
 void draw() {
-    gfx.fillScreen(COLOR_OFF);
     switch (screen) {
-    case HOME: drawHome(); break;
-    case MENU: drawList("Menu", MENU_COUNT, menuItem); break;
-    case ELRS: drawElrs(); break;
-    case CHANNELS: drawChannels(); break;
-    case TELEMETRY: drawTelemetry(); break;
-    case CALIBRATE: drawCalibrate(); break;
-    case SETTINGS: drawList(settingsDirty ? "Settings *" : "Settings", S_COUNT, settingItem); break;
-    case PROFILES: drawList("Profiles", PROFILE_COUNT, profileItem); break;
-    case REMOTE: drawRemote(); break;
-    case INFO: drawInfo(); break;
+    case HOME: showHome(); break;
+    case MENU: showList("Menu", MENU_COUNT, menuRow); break;
+    case ELRS: showElrs(); break;
+    case CHANNELS: Display::channels(st.channels, CRSF_MAX_CHANNELS); break;
+    case TELEMETRY: showTelemetry(); break;
+    case CALIBRATE: showCalibrate(); break;
+    case SETTINGS: showList(settingsDirty ? "Settings *" : "Settings", S_COUNT, settingRow); break;
+    case PROFILES: showList("Profiles", PROFILE_COUNT, profileRow); break;
+    case REMOTE: showRemote(); break;
+    case INFO: showInfo(); break;
     }
-    present();
 }
 
 }  // namespace
@@ -723,15 +594,8 @@ void UI::begin() {
     expOk = true;
 #endif
 
-    displayFound = displayBegin();
-    if (displayFound) {
-        gfx.setTextSize(1);
-        gfx.setTextColor(COLOR_ON);
-        gfx.fillScreen(COLOR_OFF);
-        text(28, 20, "ELRSTx " FW_VERSION);
-        text(28, 34, "starting...");
-        present();
-    }
+    displayFound = Display::begin();
+    if (displayFound) Display::splash(FW_VERSION);
     cfg = Config::get();
 }
 

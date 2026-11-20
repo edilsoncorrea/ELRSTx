@@ -147,7 +147,11 @@ Os diagramas acima já mostram a alimentação. O regulador 5V é um exemplo: us
 pio run -e esp32dev-st7789 -t upload
 ```
 
-No ST7789 o menu é o mesmo do OLED, ampliado ~1,9x e centralizado (240x120). Ele usa os pinos do I2C do OLED, então os dois não funcionam ao mesmo tempo. Módulos com pino CS: ligue o CS ao GND. Para girar a imagem, use `-D TFT_ROTATION=1..3`. O ESP32-C3 não tem pinos livres para o SPI. OLEDs de 1.3" com SH1106 não são suportados.
+Cada display tem seu próprio driver com layout e cores próprios (camada em [include/Display.h](../include/Display.h): `DisplaySSD1306.cpp`, `DisplayST7789.cpp`, `DisplayNone.cpp`). O `UI.cpp` só decide o que mostrar. No ST7789 a tela é colorida e ocupa os 240x240: LQ grande em verde/amarelo/vermelho, alarmes em faixa colorida, listas de 9 linhas com barra de rolagem e 12 canais. Prévia das telas: [screens/all-st7789.png](screens/all-st7789.png) e [screens/all-ssd1306.png](screens/all-ssd1306.png), geradas por `python docs/screens/render_screens.py`.
+
+![Telas no ST7789](screens/all-st7789.png)
+
+O ST7789 usa os pinos do I2C do OLED, então os dois não funcionam ao mesmo tempo. Módulos com pino CS: ligue o CS ao GND. Para girar a imagem, use `-D TFT_ROTATION=1..3`. O ESP32-C3 não tem pinos livres para o SPI. OLEDs de 1.3" com SH1106 não são suportados.
 
 **Módulo ExpressLRS (UART de 2 pinos):** TX do ESP → RX do módulo, RX do ESP ← TX do módulo, GND comum. Baud **400000** (o módulo não aceita 420000). Para módulos de um pino só (S.Port): `CRSF_INVERTED true` e um resistor de ~1 kΩ em série.
 
