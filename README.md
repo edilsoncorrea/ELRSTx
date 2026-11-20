@@ -11,9 +11,9 @@ Rádio com dois joysticks analógicos, quatro switches e um OLED, que controla u
 - **5 perfis de modelo** salvos na flash (NVS, com checksum)
 - **Segurança**: safe start (acelerador e arm bloqueados no boot até acelerador baixo + arm desligado), alarme de perda de link e de bateria baixa (LED + buzzer)
 - **Bateria do rádio** por divisor resistivo, com porcentagem para LiPo
-- **Display OLED 128x64** com menu: canais, telemetria, calibração, ajustes, perfis, WiFi/BLE e info
+- **Display OLED 128x64** com menu: canais, telemetria, calibração, ajustes, perfis, WiFi/OTA e info
+- **Configuração do módulo ExpressLRS** pelo rádio, como o script Lua do EdgeTX: taxa de pacotes, telemetria, potência, Bind, WiFi do módulo, Model Match e demais opções, lidas do próprio módulo
 - **WiFi AP** com página web de status, comandos e **atualização OTA**; também OTA pelo PlatformIO
-- **BLE UART** (Nordic UART Service) com os mesmos comandos da serial
 
 > **Failsafe:** quando o link cai, o rádio não consegue mais falar com o modelo. O comportamento do aeromodelo na perda de sinal é configurado no receptor/controladora de voo (ex.: Betaflight → Failsafe). O rádio cuida do safe start e dos alarmes.
 
@@ -84,9 +84,9 @@ LQ 100%  -45dBm           <- link com o receptor
    ■     □     □     □    <- AUX1..AUX4
 ```
 
-Menu: **Channels** (barras e µs de CH1–8), **Telemetry** (RSSI/LQ/SNR, bateria, atitude, GPS, modo de voo), **Calibrate** (assistente em 2 passos), **Settings** (deadband, inversões, safe start, alarme de link, células e limites da bateria, simulação; grava ao sair), **Profiles** (5 modelos), **WiFi/BLE/OTA** (liga/desliga e mostra rede, senha e endereço) e **Info** (versão, frames, telemetria ok/ruim, memória, tempo ligado).
+Menu: **ExpressLRS** (parâmetros do módulo TX: OK entra na pasta ou edita, cima/baixo muda o valor, OK grava, voltar cancela; comandos como Bind abrem uma janela de confirmação), **Channels** (barras e µs de CH1–8), **Telemetry** (RSSI/LQ/SNR, bateria, atitude, GPS, modo de voo), **Calibrate** (assistente em 2 passos), **Settings** (deadband, inversões, safe start, alarme de link, células e limites da bateria, simulação; grava ao sair), **Profiles** (5 modelos), **WiFi / OTA** (liga/desliga e mostra rede, senha e endereço) e **Info** (versão, frames, telemetria ok/ruim, memória, tempo ligado).
 
-## Comandos (Serial, BLE e web)
+## Comandos (Serial e web)
 
 ```
 status                  módulo, link, bateria, taxa
@@ -99,8 +99,11 @@ cal [center|start|stop|cancel]
 sim [on|off]            simulação dos sticks (t alterna)
 frame                   último frame CRSF (f)
 wifi on|off             AP + página web + OTA
-ble on|off              BLE UART
 mon on|off              linha de status a cada segundo
+elrs                    parâmetros do módulo ExpressLRS
+elrs set <id> <valor>   altera um parâmetro (texto da opção ou índice)
+elrs cmd <id> [confirm|cancel]  executa um comando (Bind, WiFi...)
+elrs reload             relê os parâmetros
 reboot
 ```
 
@@ -108,11 +111,10 @@ Chaves: `name`, `deadband`, `invert.<eixo>`, `map.<eixo>` (canal 1–4), `safest
 
 ## Configuração remota e OTA
 
-- **WiFi:** `wifi on` (ou menu WiFi/BLE/OTA). Conecte na rede `ELRSTx-XXXX` (senha padrão `elrstx1234`) e abra `http://192.168.4.1`. A página mostra o status, aceita comandos e faz upload do `firmware.bin`.
+- **WiFi:** `wifi on` (ou menu WiFi / OTA). Conecte na rede `ELRSTx-XXXX` (senha padrão `elrstx1234`) e abra `http://192.168.4.1`. A página mostra o status, aceita comandos e faz upload do `firmware.bin`.
 - **OTA pelo PlatformIO:** com o AP ligado e o PC conectado nele, rode `pio run -e ota -t upload`.
-- **BLE:** `ble on` e conecte com um app de terminal BLE UART (ex.: nRF Connect, Serial Bluetooth Terminal). Mande os mesmos comandos.
 
-Deixe WiFi e BLE desligados durante o voo: eles usam 2.4 GHz, a mesma faixa dos módulos ELRS de 2.4 GHz.
+Deixe o WiFi desligado durante o voo: ele usa 2.4 GHz, a mesma faixa dos módulos ELRS de 2.4 GHz.
 
 ## LED de status
 
@@ -122,9 +124,9 @@ Deixe WiFi e BLE desligados durante o voo: eles usam 2.4 GHz, a mesma faixa dos 
 | Pisca lento (1 Hz) | Sem receptor |
 | Duas piscadas curtas por segundo | Aviso (sem módulo, safe start, bateria baixa) |
 | Pisca rápido (4 Hz) | Perda de link ou bateria crítica |
-| Aceso com uma falha curta por segundo | WiFi ou BLE ligado |
+| Aceso com uma falha curta por segundo | WiFi ligado |
 
-Se o LED aparecer invertido, troque `LED_ACTIVE_LOW` em [include/Pins.h](include/Pins.h). Com `LED_IS_RGB 1`, um WS2812 mostra cores (verde = link, azul = sem receptor, amarelo = aviso, vermelho = alarme, roxo = WiFi/BLE).
+Se o LED aparecer invertido, troque `LED_ACTIVE_LOW` em [include/Pins.h](include/Pins.h). Com `LED_IS_RGB 1`, um WS2812 mostra cores (verde = link, azul = sem receptor, amarelo = aviso, vermelho = alarme, roxo = WiFi).
 
 ## Estrutura
 
@@ -137,8 +139,9 @@ src/Inputs.cpp        joysticks, simulação, bateria
 src/Safety.cpp        safe start e calibração
 src/State.cpp         estado compartilhado entre as tasks
 src/UI.cpp            OLED, menu, botões/switches, LED, buzzer, alarmes
+src/ElrsParams.cpp    parâmetros do ExpressLRS (protocolo do Lua)
 src/Commands.cpp      comandos de texto
-src/Remote.cpp        WiFi AP, web, OTA, BLE
+src/Remote.cpp        WiFi AP, web, OTA
 src/CRSFTest.cpp      testes do protocolo
 docs/HARDWARE.md      placas, pinagens e ligações
 docs/SIMULATION.md    modo de simulação

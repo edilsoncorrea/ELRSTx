@@ -18,6 +18,10 @@
 #define CRSF_FRAMETYPE_FLIGHT_MODE      0x21
 #define CRSF_FRAMETYPE_DEVICE_PING      0x28
 #define CRSF_FRAMETYPE_DEVICE_INFO      0x29
+#define CRSF_FRAMETYPE_PARAMETER_ENTRY  0x2B
+#define CRSF_FRAMETYPE_PARAMETER_READ   0x2C
+#define CRSF_FRAMETYPE_PARAMETER_WRITE  0x2D
+#define CRSF_FRAMETYPE_ELRS_STATUS      0x2E
 #define CRSF_FRAMETYPE_HANDSET          0x3A
 #define CRSF_HANDSET_SUBCMD_TIMING      0x10
 
@@ -85,6 +89,12 @@ public:
     void buildRCFrame(uint8_t* frame);
     void sendRCFrame(uint8_t* captureBuffer = nullptr);
     void sendDevicePing();
+    // Extended frame (dest, origin = radio) to the module; payload excludes dest/origin
+    void sendExtendedFrame(uint8_t type, uint8_t dest, const uint8_t* payload, uint8_t len);
+
+    // Called for every valid extended frame (type >= 0x28); payload starts at dest/origin
+    using ExtendedHandler = void (*)(uint8_t type, const uint8_t* payload, uint8_t len, uint32_t nowMs);
+    void setExtendedHandler(ExtendedHandler handler) { _extHandler = handler; }
 
     void processByte(uint8_t b, uint32_t nowMs);
     const CRSFTelemetry& telemetry() const { return _telem; }
@@ -93,6 +103,7 @@ public:
 
 private:
     HardwareSerial *_serial;
+    ExtendedHandler _extHandler = nullptr;
     uint16_t _channels[CRSF_MAX_CHANNELS];
     CRSFTelemetry _telem;
     uint8_t _rx[CRSF_FRAME_SIZE_MAX];

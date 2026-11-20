@@ -86,11 +86,20 @@ void CRSF::sendRCFrame(uint8_t* captureBuffer) {
 }
 
 void CRSF::sendDevicePing() {
-    if (_serial == nullptr) return;
-    uint8_t frame[6] = {CRSF_ADDRESS_TRANSMITTER, 4, CRSF_FRAMETYPE_DEVICE_PING,
-                        CRSF_ADDRESS_TRANSMITTER, CRSF_ADDRESS_RADIO, 0};
-    frame[5] = crc8(&frame[2], 3);
-    _serial->write(frame, sizeof(frame));
+    sendExtendedFrame(CRSF_FRAMETYPE_DEVICE_PING, CRSF_ADDRESS_TRANSMITTER, nullptr, 0);
+}
+
+void CRSF::sendExtendedFrame(uint8_t type, uint8_t dest, const uint8_t* payload, uint8_t len) {
+    if (_serial == nullptr || len > CRSF_FRAME_SIZE_MAX - 6) return;
+    uint8_t frame[CRSF_FRAME_SIZE_MAX];
+    frame[0] = CRSF_ADDRESS_TRANSMITTER;
+    frame[1] = len + 4;  // type + dest + origin + payload + crc
+    frame[2] = type;
+    frame[3] = dest;
+    frame[4] = CRSF_ADDRESS_RADIO;
+    if (len) memcpy(&frame[5], payload, len);
+    frame[5 + len] = crc8(&frame[2], len + 3);
+    _serial->write(frame, len + 6);
 }
 
 void CRSF::processByte(uint8_t b, uint32_t nowMs) {
@@ -177,8 +186,8 @@ void CRSF::handleFrame(uint32_t nowMs) {
     }
 
     case CRSF_FRAMETYPE_DEVICE_INFO: {
-        // extended frame: dest, origin, null-terminated name, ...
-        if (len < 3) return;
+        // extended frame: dest, origin, null-terminated name, ...; only the TX module's own name
+        if (len < 3 || p[1] != CRSF_ADDRESS_TRANSMITTER) break;
         const char* name = reinterpret_cast<const char*>(p + 2);
         const size_t n = min(strnlen(name, len - 2), sizeof(t.deviceName) - 1);
         memcpy(t.deviceName, name, n);
@@ -194,4 +203,6 @@ void CRSF::handleFrame(uint32_t nowMs) {
         t.lastSyncMs = nowMs;
         break;
     }
+
+    if (type >= CRSF_FRAMETYPE_DEVICE_PING && _extHandler) _extHandler(type, p, len, nowMs);
 }

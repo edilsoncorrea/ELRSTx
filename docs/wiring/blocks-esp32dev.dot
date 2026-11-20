@@ -51,8 +51,8 @@ digraph ELRSTx {
     sw   -> esp [label="GPIO 18 / 19 / 23 / 26", color="#2e86c1", fontcolor="#2e86c1"];
 
     // link
-    esp -> elrs [label="CRSF 400000 baud\nTX GPIO17 → RX", color="#1e8449", fontcolor="#1e8449", penwidth=2];
-    elrs -> esp [label="telemetria\nTX → RX GPIO16", color="#1e8449", fontcolor="#1e8449", style=dashed];
+    esp -> elrs [label="CRSF 400000 baud\nGPIO17 → GPIO13 do módulo", color="#1e8449", fontcolor="#1e8449", penwidth=2];
+    elrs -> esp [label="telemetria\nGPIO16 do módulo → GPIO16", color="#1e8449", fontcolor="#1e8449", style=dashed];
     elrs -> rx  [label="rádio 2.4 GHz / 900 MHz", dir=both, style=dashed, color="#7f8c8d", fontcolor="#7f8c8d"];
     rx -> fc    [label="CRSF", color="#7f8c8d", fontcolor="#7f8c8d"];
     // interface

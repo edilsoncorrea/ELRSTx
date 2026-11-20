@@ -6,7 +6,7 @@ Gera movimentos suaves nos 4 eixos sem joysticks ligados, para testar o link CRS
 
 É uma configuração do perfil, ligada em tempo de execução:
 
-- Serial/BLE/web: `sim on`, `sim off` ou `t` (alterna)
+- Serial/web: `sim on`, `sim off` ou `t` (alterna)
 - Menu: **Settings → Simulation**
 - Para manter após reiniciar: `save`
 

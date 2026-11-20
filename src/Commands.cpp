@@ -1,5 +1,6 @@
 #include "Commands.h"
 #include "Config.h"
+#include "ElrsParams.h"
 #include "Inputs.h"
 #include "Pins.h"
 #include "Safety.h"
@@ -22,8 +23,11 @@ const char HELP[] =
     "  sim [on|off]            stick simulation (t = toggle)\n"
     "  frame                   dump last CRSF frame (f)\n"
     "  wifi on|off             WiFi AP: web config + OTA\n"
-    "  ble on|off              BLE UART config\n"
     "  mon on|off              status line every second\n"
+    "  elrs                    ExpressLRS module parameters (like the ELRS Lua)\n"
+    "  elrs set <id> <value>   change a parameter (option text or index)\n"
+    "  elrs cmd <id> [confirm|cancel]  run a command (Bind, WiFi...)\n"
+    "  elrs reload\n"
     "  reboot\n"
     "Keys: name, deadband, invert.<axis>, map.<axis> (ch 1-4), safestart,\n"
     "      linkalarm, linktimeout, batt.ratio, batt.cells, batt.warn,\n"
@@ -173,6 +177,120 @@ String calibrate(const String& arg) {
     return o;
 }
 
+const char* commandStepText(int16_t step) {
+    switch (step) {
+    case ElrsParams::CMD_EXECUTING: return "running";
+    case ElrsParams::CMD_ASK_CONFIRM: return "needs confirm";
+    default: return "";
+    }
+}
+
+void elrsTree(String& o, uint8_t folder, uint8_t depth) {
+    using namespace ElrsParams;
+    uint8_t ids[MAX_PARAMS];
+    const uint8_t n = children(folder, ids, sizeof(ids));
+    for (uint8_t i = 0; i < n; i++) {
+        Param p;
+        if (!param(ids[i], p)) continue;
+        String line = String(p.id);
+        while (line.length() < 4) line += ' ';
+        for (uint8_t d = 0; d < depth; d++) line += "  ";
+        switch (p.type) {
+        case T_FOLDER:
+            o += line + p.name + "/\n";
+            elrsTree(o, p.id, depth + 1);
+            continue;
+        case T_COMMAND:
+            line += String("[") + p.name + "]";
+            if (commandStepText(p.value)[0]) line += String("  ") + commandStepText(p.value);
+            if (p.text[0]) line += String("  ") + p.text;
+            break;
+        case T_SELECT: {
+            line += p.name;
+            while (line.length() < 30) line += ' ';
+            String opts = p.text;
+            opts.replace(";", ", ");
+            line += "= " + valueText(p, p.value) + "   (" + opts + ")";
+            break;
+        }
+        case T_UINT8:
+        case T_INT8:
+        case T_UINT16:
+        case T_INT16:
+            line += p.name;
+            while (line.length() < 30) line += ' ';
+            line += "= " + valueText(p, p.value) + "   (" + p.min + ".." + p.max + ")";
+            break;
+        default:
+            line += String(p.name) + ": " + p.text;
+            break;
+        }
+        o += line + "\n";
+    }
+}
+
+String elrsCommand(const String& arg) {
+    using namespace ElrsParams;
+    touch();
+    const Status s = status();
+    const int sp = arg.indexOf(' ');
+    String sub = sp < 0 ? arg : arg.substring(0, sp);
+    sub.toLowerCase();
+    String rest = sp < 0 ? "" : arg.substring(sp + 1);
+    rest.trim();
+
+    if (sub == "" || sub == "list") {
+        if (!s.fieldCount) return "Waiting for the ELRS module (no device info yet). Check the CRSF wiring and retry 'elrs'.";
+        String o = String("ExpressLRS: ") + s.device + " (" + s.fieldCount + " params)";
+        if (s.statusValid) {
+            o += String("  bad/good ") + s.badPackets + "/" + s.goodPackets;
+            if (s.message[0]) o += String("  [") + s.message + "]";
+        }
+        o += "\n";
+        if (s.loading) o += String("Loading ") + s.loadedCount + "/" + s.fieldCount + ", run 'elrs' again shortly\n";
+        elrsTree(o, 0, 0);
+        return o;
+    }
+    if (sub == "reload") {
+        reload();
+        return "OK reloading ExpressLRS parameters";
+    }
+
+    const int sp2 = rest.indexOf(' ');
+    long id;
+    if (!parseInt(sp2 < 0 ? rest : rest.substring(0, sp2), 1, MAX_PARAMS - 1, id)) return "ERR usage: elrs set|cmd <id> ...";
+    String value = sp2 < 0 ? "" : rest.substring(sp2 + 1);
+    value.trim();
+    Param p;
+    if (!param(id, p)) return "ERR unknown parameter id (run 'elrs' first)";
+
+    if (sub == "set") {
+        long v;
+        if (p.type == T_SELECT) {
+            if (!parseInt(value, p.min, p.max, v)) v = findOption(p, value);
+            if (v < 0 || valueText(p, v).length() <= strlen(p.units)) {
+                String opts = p.text;
+                opts.replace(";", ", ");
+                return "ERR options: " + opts;
+            }
+        } else if (p.type <= T_INT16) {
+            if (!parseInt(value, p.min, p.max, v)) return String("ERR range ") + p.min + ".." + p.max;
+        } else {
+            return "ERR this parameter cannot be set";
+        }
+        ElrsParams::setValue(id, v);
+        return String("OK ") + p.name + " = " + valueText(p, v);
+    }
+    if (sub == "cmd") {
+        if (p.type != T_COMMAND) return "ERR not a command";
+        value.toLowerCase();
+        const CmdStep step = value == "confirm" ? CMD_CONFIRM : value == "cancel" ? CMD_CANCEL : CMD_CLICK;
+        command(id, step);
+        return String("OK sent to ") + p.name + ", run 'elrs' to see the result";
+    }
+    return "ERR usage: elrs [list|reload|set <id> <value>|cmd <id> [confirm|cancel]]";
+}
+
 String frameText() {
     const RcState st = State::snapshot();
     String o = "Frame:";
@@ -235,7 +353,7 @@ String Commands::statusText() {
     for (uint8_t i = 0; i < 8; i++) o += " " + String(st.channels[i]);
     o += "\nFrames sent: " + String(st.frames) + "  telemetry ok/bad: " + t.goodFrames + "/" + t.badFrames + "\n";
     if (st.safeStartHold) o += "SAFE START: move throttle to minimum and switch AUX1 (arm) off\n";
-    o += "WiFi: " + onOff(Remote::wifiActive()) + "  BLE: " + onOff(Remote::bleActive());
+    o += "WiFi: " + onOff(Remote::wifiActive());
     return o;
 }
 
@@ -298,18 +416,13 @@ String Commands::execute(const String& input) {
         return "OK simulation " + onOff(s.model.simulation);
     }
     if (cmd == "frame") return frameText();
+    if (cmd == "elrs") return elrsCommand(arg);
     if (cmd == "wifi") {
         bool b;
         if (!parseBool(arg, b)) return "ERR usage: wifi on|off";
         Remote::setWifi(b);
         if (!b) return "OK WiFi off";
         return "OK WiFi AP '" + Remote::ssid() + "' pass '" + Config::get().hw.wifiPass + "' -> http://192.168.4.1";
-    }
-    if (cmd == "ble") {
-        bool b;
-        if (!parseBool(arg, b)) return "ERR usage: ble on|off";
-        Remote::setBle(b);
-        return b ? "OK BLE advertising as 'ELRSTx' (Nordic UART service)" : "OK BLE off";
     }
     if (cmd == "mon") {
         bool b;

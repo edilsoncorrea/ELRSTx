@@ -159,7 +159,7 @@ def contacts(d, x, y, title, nets, kind):
 def module(d, x, y, name, pins, group):
     """pins: list of (pin, kind, value) with kind 'net', 'rail' or 'gnd'; drawn on the left side."""
     ic_pins = [elm.IcPin(name=p, side="left", anchorname=f"p{i}") for i, (p, _, _) in enumerate(pins)]
-    ic = ic_block(d, (x, y), "p0", name, ic_pins, 2.2, GROUPS[group], loc="top", ofst=0.3)
+    ic = ic_block(d, (x, y), "p0", name, ic_pins, 2.8, GROUPS[group], loc="top", ofst=0.3)
     for i, (_, kind, value) in enumerate(pins):
         a = getattr(ic, f"p{i}")
         if kind == "net":
@@ -216,8 +216,9 @@ def draw(key, board):
         contacts(d, -21, -8.5, "Switches AUX (para GND)", ["AUX1_ARM", "AUX2", "AUX3", "AUX4"], "switch")
         module(d, 11.5, 9.4, "Display OLED 0.96\nSSD1306 - I2C 0x3C",
                [("VCC", "rail", "3V3"), ("GND", "gnd", None), ("SCL", "net", "SCL"), ("SDA", "net", "SDA")], "i2c")
-        module(d, 11.5, 3.4, "Módulo ExpressLRS TX\nUART 400000 baud",
-               [("VCC", "rail", "5V"), ("GND", "gnd", None), ("RX", "net", "CRSF_TX"), ("TX", "net", "CRSF_RX")], "crsf")
+        module(d, 11.5, 3.4, "Módulo ELRS TX DIY (ESP32 + E28)\nUART 400000 - serial_rx 13 / serial_tx 16",
+               [("VCC", "rail", "5V"), ("GND", "gnd", None), ("GPIO13 RX", "net", "CRSF_TX"),
+                ("GPIO16 TX", "net", "CRSF_RX")], "crsf")
         module(d, 11.5, -2.6, "Buzzer ativo", [("+", "net", "BUZZER"), ("-", "gnd", None)], "ind")
         led(d, 19, -2.6, board["led_active_low"])
         if board["expander"]:

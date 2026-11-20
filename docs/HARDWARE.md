@@ -9,8 +9,7 @@ O firmware compila para duas placas. A pinagem de cada uma fica em [include/Pins
 | Botões e switches | direto nos GPIOs | PCF8574 por I2C | direto nos GPIOs |
 | ADC | menos linear (a calibração compensa) | bom | bom |
 | USB | chip USB-serial | USB nativo | USB nativo |
-| Bluetooth | BLE (Bluedroid, firmware maior) | BLE (NimBLE) | BLE (NimBLE) |
-| Flash usada | ~1,8 MB de 1,9 MB | ~1,4 MB de 1,9 MB | — |
+| Flash usada | ~1,1 MB de 1,9 MB | ~1,2 MB de 1,9 MB | — |
 
 Gravar:
 
@@ -101,7 +100,32 @@ Fonte: [wiring/esp32c3.yml](wiring/esp32c3.yml). OLED e PCF8574 dividem os mesmo
 
 ## ESP32-S3 — opção futura
 
-Tem mais pinos, ADC melhor, USB nativo e BLE pequeno (NimBLE). Ainda não há pinagem nem ambiente para ele; precisaria de um bloco novo em `Pins.h` e um ambiente no `platformio.ini`.
+Tem mais pinos, ADC melhor, USB nativo. Ainda não há pinagem nem ambiente para ele; precisaria de um bloco novo em `Pins.h` e um ambiente no `platformio.ini`.
+
+## Módulo ExpressLRS TX DIY (ESP32 + E28)
+
+O módulo de rádio é um segundo ESP32 DevKit com um EBYTE E28 (SX1280, 2.4 GHz), gravado com o ExpressLRS **3.5.3** pelo Configurator, alvo **"DIY 2400 TX ESP32 SX1280 E28"**. O receptor precisa estar na mesma versão principal (3.x) e com a mesma binding phrase.
+
+| Função no módulo | GPIO do módulo |
+|---|---|
+| CRSF RX (vem do ELRSTx) | **13** |
+| CRSF TX (vai para o ELRSTx) | **16** |
+| SX1280 SCK / MISO / MOSI | 18 / 19 / 23 |
+| NSS / RESET / BUSY / DIO1 | 5 / 14 / 15 / 4 |
+| E28 TXEN / RXEN / LNA | 26 / 27 / 12 |
+| OLED do módulo SDA / SCL (opcional) | 21 / 22 |
+| Joystick do menu / ventoinha | 35 / 17 |
+
+Ligação com o ELRSTx (DevKit): **GPIO17 → GPIO13 do módulo**, **GPIO16 do módulo → GPIO16**, GND comum. No C3 o ELRSTx usa GPIO21 → 13 e 16 → GPIO20.
+
+O alvo padrão usa CRSF num fio só (GPIO13). Para os dois fios, a página de hardware do módulo (`http://<ip-do-módulo>/hardware.html`) precisa ter:
+
+- `serial_rx = 13` e `serial_tx = 16` (pinos diferentes = full-duplex, sem inversão)
+- **sem `led_rgb`**: o layout personalizado vinha com `led_rgb = 15`, o mesmo pino do BUSY do SX1280, o que atrapalha o rádio
+
+Depois de regravar pelo Configurator, confira de novo esses campos.
+
+O módulo **só transmite quando recebe CRSF de um rádio**. Sem o ELRSTx ligado, ele entra no WiFi depois de `wifi-on-interval` segundos e o receptor nunca conecta. Os parâmetros do módulo (taxa, potência, telemetria, Bind) podem ser alterados pelo próprio ELRSTx: menu **ExpressLRS** ou comando `elrs`.
 
 ## Alimentação e bateria
 
@@ -112,7 +136,18 @@ Os diagramas acima já mostram a alimentação. O regulador 5V é um exemplo: us
 
 ## Comum a todas as placas
 
-**Display:** OLED 0.96" SSD1306 128x64 **I2C de 4 pinos** (GND, VCC 3.3V, SCL, SDA), endereço 0x3C (alguns usam 0x3D). Módulos SPI (6–7 pinos) e os de 1.3" com SH1106 não são suportados.
+**Display:** escolhido na compilação pelo ambiente do PlatformIO (`DISPLAY_TYPE` em [include/Pins.h](../include/Pins.h)).
+
+| Display | Ambiente | Ligação |
+|---------|----------|---------|
+| OLED 0.96" SSD1306 128x64, I2C de 4 pinos (padrão) | `esp32dev` / `esp32-c3-devkitm-1` | SDA/SCL do I2C, VCC 3V3, endereço 0x3C (alguns usam 0x3D) |
+| IPS 1.3"/1.54" ST7789 240x240, SPI (só DevKit) | `esp32dev-st7789` | SCL → GPIO22, SDA → GPIO21, DC → GPIO33, RES → GPIO5, BLK → 3V3, VCC 3V3 |
+
+```bash
+pio run -e esp32dev-st7789 -t upload
+```
+
+No ST7789 o menu é o mesmo do OLED, ampliado ~1,9x e centralizado (240x120). Ele usa os pinos do I2C do OLED, então os dois não funcionam ao mesmo tempo. Módulos com pino CS: ligue o CS ao GND. Para girar a imagem, use `-D TFT_ROTATION=1..3`. O ESP32-C3 não tem pinos livres para o SPI. OLEDs de 1.3" com SH1106 não são suportados.
 
 **Módulo ExpressLRS (UART de 2 pinos):** TX do ESP → RX do módulo, RX do ESP ← TX do módulo, GND comum. Baud **400000** (o módulo não aceita 420000). Para módulos de um pino só (S.Port): `CRSF_INVERTED true` e um resistor de ~1 kΩ em série.
 

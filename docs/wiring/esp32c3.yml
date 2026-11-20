@@ -40,10 +40,10 @@ connectors:
     subtype: I2C 0x3C
     pinlabels: [GND, VCC, SCL, SDA]
   ELRS:
-    type: Módulo ExpressLRS TX
-    subtype: UART 400000 baud
-    notes: VCC conforme o módulo
-    pinlabels: [GND, VCC, RX, TX]
+    type: Módulo ExpressLRS TX DIY
+    subtype: ESP32 + E28 - UART 400000
+    notes: "hardware.json: serial_rx 13, serial_tx 16"
+    pinlabels: [GND, VCC, GPIO13 RX, GPIO16 TX]
   BUZZER:
     type: Buzzer ativo
     pinlabels: [BZ+, BZ-]
@@ -95,7 +95,7 @@ connections:
     - OLED: [GND, VCC, SCL, SDA]
   - - ESP32C3: [GND, 5V, GPIO21, GPIO20]
     - W_ELRS: [1-4]
-    - ELRS: [GND, VCC, RX, TX]
+    - ELRS: [GND, VCC, GPIO13 RX, GPIO16 TX]
   - - ESP32C3: [GPIO10, GND]
     - W_BUZ: [1-2]
     - BUZZER: [BZ+, BZ-]

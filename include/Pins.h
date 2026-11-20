@@ -49,6 +49,26 @@
 #define INPUTS_VIA_EXPANDER 0
 #define LED_IS_RGB          0
 #define LED_ACTIVE_LOW      0
+
+// ST7789 240x240 IPS (DISPLAY_TYPE == DISPLAY_ST7789) reuses the OLED I2C pins; BLK to 3V3
+#define PIN_TFT_SCLK        22
+#define PIN_TFT_MOSI        21
+#define PIN_TFT_DC          33
+#define PIN_TFT_RST         5
+#endif
+
+// Display selected per PlatformIO environment: -D DISPLAY_TYPE=DISPLAY_ST7789
+#define DISPLAY_NONE        0
+#define DISPLAY_SSD1306     1   // OLED 0.96" 128x64, I2C
+#define DISPLAY_ST7789      2   // IPS 240x240, SPI
+#ifndef DISPLAY_TYPE
+#define DISPLAY_TYPE        DISPLAY_SSD1306
+#endif
+#ifndef TFT_ROTATION
+#define TFT_ROTATION        0
+#endif
+#if DISPLAY_TYPE == DISPLAY_ST7789 && !defined(PIN_TFT_DC)
+#error "ST7789 is only wired for the ESP32 DevKit: the ESP32-C3 has no free pins for SPI"
 #endif
 
 #define I2C_ADDR_OLED       0x3C

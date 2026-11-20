@@ -56,8 +56,8 @@ PCF8574 (0x20)", fillcolor="#dbeaf7"];
 (mesmo barramento do OLED)", color="#7d3c98", fontcolor="#7d3c98", dir=both];
 
     // link
-    esp -> elrs [label="CRSF 400000 baud\nTX GPIO21 → RX", color="#1e8449", fontcolor="#1e8449", penwidth=2];
-    elrs -> esp [label="telemetria\nTX → RX GPIO20", color="#1e8449", fontcolor="#1e8449", style=dashed];
+    esp -> elrs [label="CRSF 400000 baud\nGPIO21 → GPIO13 do módulo", color="#1e8449", fontcolor="#1e8449", penwidth=2];
+    elrs -> esp [label="telemetria\nGPIO16 do módulo → GPIO20", color="#1e8449", fontcolor="#1e8449", style=dashed];
     elrs -> rx  [label="rádio 2.4 GHz / 900 MHz", dir=both, style=dashed, color="#7f8c8d", fontcolor="#7f8c8d"];
     rx -> fc    [label="CRSF", color="#7f8c8d", fontcolor="#7f8c8d"];
     // interface

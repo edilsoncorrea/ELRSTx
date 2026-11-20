@@ -4,6 +4,7 @@
 #include "CRSFTest.h"
 #include "Commands.h"
 #include "Config.h"
+#include "ElrsParams.h"
 #include "Inputs.h"
 #include "Pins.h"
 #include "Safety.h"
@@ -63,6 +64,7 @@ void rcCycle(RcState& st, uint32_t& lastPingMs, uint32_t& lastBatteryMs) {
 
     for (uint8_t i = 0; i < CRSF_MAX_CHANNELS; i++) crsf.setChannel(i, ch[i]);
     crsf.sendRCFrame(st.lastFrame);
+    ElrsParams::poll(crsf, now);
 
     // Ask the module to identify itself; the reply proves the UART link works even without a receiver
     if (!t.deviceName[0] && now - lastPingMs >= PING_INTERVAL_MS) {
@@ -122,6 +124,8 @@ void setup() {
     Serial1.setRxBufferSize(1024);
     Serial1.begin(CRSF_BAUDRATE, SERIAL_8N1, PIN_CRSF_RX, PIN_CRSF_TX, CRSF_INVERTED);
     crsf.begin(Serial1);
+    ElrsParams::begin();
+    crsf.setExtendedHandler(ElrsParams::onFrame);
 
 #ifdef RUN_UNIT_TESTS
     CRSFTest::runAllTests();

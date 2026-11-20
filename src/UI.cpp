@@ -1,23 +1,87 @@
 #include "UI.h"
 #include <Wire.h>
 #include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
 #include "Commands.h"
 #include "Config.h"
 #include "Inputs.h"
 #include "Pins.h"
 #include "Safety.h"
 #include "State.h"
+#include "ElrsParams.h"
+
+#if DISPLAY_TYPE == DISPLAY_SSD1306
+#include <Adafruit_SSD1306.h>
+#elif DISPLAY_TYPE == DISPLAY_ST7789
+#include <SPI.h>
+#include <Adafruit_ST7789.h>
+#endif
 
 namespace {
 
+constexpr uint16_t COLOR_ON = 1;
+constexpr uint16_t COLOR_OFF = 0;
+
+#if DISPLAY_TYPE == DISPLAY_SSD1306
 Adafruit_SSD1306 oled(128, 64, &Wire, -1, 400000UL, 400000UL);
-bool oledOk = false;
+Adafruit_GFX& gfx = oled;
+#else
+// The UI is laid out for 128x64; other panels get this 1-bit canvas scaled up
+GFXcanvas1 canvas(128, 64);
+Adafruit_GFX& gfx = canvas;
+#endif
+
+#if DISPLAY_TYPE == DISPLAY_ST7789
+Adafruit_ST7789 tft(&SPI, -1, PIN_TFT_DC, PIN_TFT_RST);
+constexpr int16_t TFT_SIZE = 240;
+constexpr int16_t TFT_VIEW_H = 120;  // 64 * 240 / 128, centred vertically
+constexpr uint16_t TFT_FG = ST77XX_WHITE;
+constexpr uint16_t TFT_BG = ST77XX_BLACK;
+#endif
+
+bool displayFound = false;
+
+bool displayBegin() {
+#if DISPLAY_TYPE == DISPLAY_SSD1306
+    Wire.beginTransmission(I2C_ADDR_OLED);
+    return Wire.endTransmission() == 0 && oled.begin(SSD1306_SWITCHCAPVCC, I2C_ADDR_OLED, true, false);
+#elif DISPLAY_TYPE == DISPLAY_ST7789
+    SPI.begin(PIN_TFT_SCLK, -1, PIN_TFT_MOSI, -1);
+    tft.init(TFT_SIZE, TFT_SIZE, SPI_MODE3);  // 240x240 modules without a CS pin need mode 3
+    tft.setSPISpeed(40000000);
+    tft.setRotation(TFT_ROTATION);
+    tft.fillScreen(TFT_BG);
+    return true;  // write-only bus, presence cannot be detected
+#else
+    return false;
+#endif
+}
+
+void present() {
+#if DISPLAY_TYPE == DISPLAY_SSD1306
+    oled.display();
+#elif DISPLAY_TYPE == DISPLAY_ST7789
+    static uint16_t line[TFT_SIZE];
+    static uint8_t srcX[TFT_SIZE];
+    static bool mapped = false;
+    if (!mapped) {
+        for (int16_t x = 0; x < TFT_SIZE; x++) srcX[x] = x * 128 / TFT_SIZE;
+        mapped = true;
+    }
+    tft.startWrite();
+    tft.setAddrWindow(0, (TFT_SIZE - TFT_VIEW_H) / 2, TFT_SIZE, TFT_VIEW_H);
+    for (int16_t y = 0; y < TFT_VIEW_H; y++) {
+        const int16_t sy = y * 64 / TFT_VIEW_H;
+        for (int16_t x = 0; x < TFT_SIZE; x++) line[x] = canvas.getPixel(srcX[x], sy) ? TFT_FG : TFT_BG;
+        tft.writePixels(line, TFT_SIZE);
+    }
+    tft.endWrite();
+#endif
+}
 bool expOk = false;
 
-enum Screen : uint8_t { HOME, MENU, CHANNELS, TELEMETRY, CALIBRATE, SETTINGS, PROFILES, REMOTE, INFO };
-const char* const MENU_LABELS[] = {"Channels", "Telemetry", "Calibrate", "Settings", "Profiles", "WiFi/BLE/OTA", "Info"};
-const Screen MENU_TARGETS[] = {CHANNELS, TELEMETRY, CALIBRATE, SETTINGS, PROFILES, REMOTE, INFO};
+enum Screen : uint8_t { HOME, MENU, ELRS, CHANNELS, TELEMETRY, CALIBRATE, SETTINGS, PROFILES, REMOTE, INFO };
+const char* const MENU_LABELS[] = {"ExpressLRS", "Channels", "Telemetry", "Calibrate", "Settings", "Profiles", "WiFi / OTA", "Info"};
+const Screen MENU_TARGETS[] = {ELRS, CHANNELS, TELEMETRY, CALIBRATE, SETTINGS, PROFILES, REMOTE, INFO};
 constexpr uint8_t MENU_COUNT = sizeof(MENU_TARGETS) / sizeof(MENU_TARGETS[0]);
 
 enum SettingId : uint8_t {
@@ -38,6 +102,13 @@ bool settingsDirty = false;
 uint8_t calStep = 0;
 String calResult;
 String profileNames[PROFILE_COUNT];
+
+// ExpressLRS screen: current folder, its visible parameters, value being edited, open command popup
+uint8_t elrsFolder = 0;
+uint8_t elrsIds[ElrsParams::MAX_PARAMS];
+uint8_t elrsCount = 0;
+int16_t elrsEditValue = 0;
+uint8_t elrsCmdId = 0;
 
 const uint8_t REPEAT_BUTTONS[] = {EXP_BTN_UP, EXP_BTN_DOWN};
 uint8_t buttonsPrev = 0;
@@ -140,7 +211,7 @@ void updateAlarms() {
 void updateIndicators() {
     const bool fast = (nowMs / 125) & 1;
     const bool slow = (nowMs / 500) & 1;
-    const bool remote = Remote::wifiActive() || Remote::bleActive();
+    const bool remote = Remote::wifiActive();
 #if LED_IS_RGB
     if (alarmLevel == ALARM_CRIT) setLed(fast ? 40 : 0, 0, 0);
     else if (alarmLevel == ALARM_WARN) setLed(slow ? 30 : 0, slow ? 20 : 0, 0);
@@ -217,11 +288,77 @@ void enter(Screen s) {
         for (uint8_t i = 0; i < PROFILE_COUNT; i++) profileNames[i] = Config::profileName(i);
         cursor = cfg.profile;
     }
+    if (s == ELRS) {
+        elrsFolder = 0;
+        elrsCmdId = 0;
+        ElrsParams::touch();
+    }
 }
 
 void moveCursor(bool up, bool down, uint8_t count) {
     if (up) cursor = (cursor + count - 1) % count;
     if (down) cursor = (cursor + 1) % count;
+}
+
+void elrsButtons(bool up, bool down, bool ok, bool back) {
+    using namespace ElrsParams;
+    if (elrsCmdId) {
+        Param p;
+        const bool known = param(elrsCmdId, p);
+        if (known && p.value == CMD_ASK_CONFIRM) {
+            if (ok) {
+                command(elrsCmdId, CMD_CONFIRM);
+            } else if (back) {
+                command(elrsCmdId, CMD_CANCEL);
+                elrsCmdId = 0;
+            }
+        } else if (ok || back) {
+            if (known && p.value == CMD_EXECUTING && back) command(elrsCmdId, CMD_CANCEL);
+            elrsCmdId = 0;
+        }
+        return;
+    }
+    if (editing) {
+        Param p;
+        if (cursor >= elrsCount || !param(elrsIds[cursor], p)) {
+            editing = false;
+            return;
+        }
+        if (up) elrsEditValue = nextValue(p, elrsEditValue, +1);
+        if (down) elrsEditValue = nextValue(p, elrsEditValue, -1);
+        if (ok) {
+            setValue(p.id, elrsEditValue);
+            editing = false;
+        } else if (back) {
+            editing = false;
+        }
+        return;
+    }
+    if (elrsCount) moveCursor(up, down, elrsCount);
+    if (ok && cursor < elrsCount) {
+        Param p;
+        if (!param(elrsIds[cursor], p)) return;
+        if (p.type == T_FOLDER) {
+            elrsFolder = p.id;
+            cursor = 0;
+            scroll = 0;
+        } else if (p.type == T_SELECT || p.type <= T_INT16) {
+            editing = true;
+            elrsEditValue = p.value;
+        } else if (p.type == T_COMMAND) {
+            command(p.id, CMD_CLICK);
+            elrsCmdId = p.id;
+        }
+    } else if (back) {
+        if (elrsFolder) {
+            Param f;
+            elrsFolder = param(elrsFolder, f) ? f.parent : 0;
+            cursor = 0;
+            scroll = 0;
+        } else {
+            enter(MENU);
+        }
+    }
 }
 
 void handleButtons(uint8_t pressed) {
@@ -239,6 +376,9 @@ void handleButtons(uint8_t pressed) {
         moveCursor(up, down, MENU_COUNT);
         if (ok) enter(MENU_TARGETS[cursor]);
         else if (back) enter(HOME);
+        break;
+    case ELRS:
+        elrsButtons(up, down, ok, back);
         break;
     case CHANNELS:
     case TELEMETRY:
@@ -273,10 +413,8 @@ void handleButtons(uint8_t pressed) {
         }
         break;
     case REMOTE:
-        moveCursor(up, down, 2);
         if (ok) {
-            if (cursor == 0) Remote::setWifi(!Remote::wifiActive());
-            else Remote::setBle(!Remote::bleActive());
+            Remote::setWifi(!Remote::wifiActive());
         } else if (back) {
             enter(MENU);
         }
@@ -309,13 +447,13 @@ void handleButtons(uint8_t pressed) {
 // ---------- drawing ----------
 
 void text(int16_t x, int16_t y, const String& s) {
-    oled.setCursor(x, y);
-    oled.print(s);
+    gfx.setCursor(x, y);
+    gfx.print(s);
 }
 
 void header(const char* title) {
     text(0, 0, title);
-    oled.drawFastHLine(0, 9, 128, SSD1306_WHITE);
+    gfx.drawFastHLine(0, 9, 128, COLOR_ON);
 }
 
 float channelFraction(uint16_t v) {
@@ -323,8 +461,8 @@ float channelFraction(uint16_t v) {
 }
 
 void bar(int16_t x, int16_t y, int16_t w, int16_t h, float f) {
-    oled.drawRect(x, y, w, h, SSD1306_WHITE);
-    oled.fillRect(x + 1, y + 1, (int16_t)((w - 2) * f), h - 2, SSD1306_WHITE);
+    gfx.drawRect(x, y, w, h, COLOR_ON);
+    gfx.fillRect(x + 1, y + 1, (int16_t)((w - 2) * f), h - 2, COLOR_ON);
 }
 
 void drawList(const char* title, uint8_t count, String (*item)(uint8_t)) {
@@ -335,11 +473,11 @@ void drawList(const char* title, uint8_t count, String (*item)(uint8_t)) {
         const uint8_t i = scroll + row;
         const int16_t y = 12 + row * 9;
         if (i == cursor) {
-            oled.fillRect(0, y - 1, 128, 9, SSD1306_WHITE);
-            oled.setTextColor(SSD1306_BLACK);
+            gfx.fillRect(0, y - 1, 128, 9, COLOR_ON);
+            gfx.setTextColor(COLOR_OFF);
         }
         text(2, y, item(i));
-        oled.setTextColor(SSD1306_WHITE);
+        gfx.setTextColor(COLOR_ON);
     }
 }
 
@@ -352,7 +490,7 @@ void drawHome() {
         snprintf(buf, sizeof(buf), "%.1fV", st.txBatteryMv / 1000.0f);
         text(128 - strlen(buf) * 6, 0, buf);
     }
-    oled.drawFastHLine(0, 9, 128, SSD1306_WHITE);
+    gfx.drawFastHLine(0, 9, 128, COLOR_ON);
 
     if (!State::moduleAlive(st, nowMs)) text(0, 12, "No ELRS module");
     else text(0, 12, st.telem.deviceName[0] ? st.telem.deviceName : "ELRS module OK");
@@ -367,10 +505,10 @@ void drawHome() {
     text(0, 30, rate);
 
     if (alarmLevel != ALARM_NONE) {
-        oled.fillRect(0, 38, 128, 10, SSD1306_WHITE);
-        oled.setTextColor(SSD1306_BLACK);
+        gfx.fillRect(0, 38, 128, 10, COLOR_ON);
+        gfx.setTextColor(COLOR_OFF);
         text(2, 39, alarmText);
-        oled.setTextColor(SSD1306_WHITE);
+        gfx.setTextColor(COLOR_ON);
     } else if (st.telem.flightMode[0]) {
         text(0, 39, st.telem.flightMode);
     }
@@ -378,8 +516,8 @@ void drawHome() {
     for (uint8_t a = 0; a < AXIS_COUNT; a++) bar(a * 32, 50, 30, 6, channelFraction(st.channels[cfg.model.channel[a]]));
     for (uint8_t i = 0; i < AUX_COUNT; i++) {
         const bool on = st.channels[AUX_FIRST_CHANNEL + i] > CRSF_CHANNEL_VALUE_MID;
-        if (on) oled.fillRect(i * 32 + 11, 58, 8, 6, SSD1306_WHITE);
-        else oled.drawRect(i * 32 + 11, 58, 8, 6, SSD1306_WHITE);
+        if (on) gfx.fillRect(i * 32 + 11, 58, 8, 6, COLOR_ON);
+        else gfx.drawRect(i * 32 + 11, 58, 8, 6, COLOR_ON);
     }
 }
 
@@ -447,25 +585,17 @@ void drawCalibrate() {
 }
 
 void drawRemote() {
-    header("WiFi / BLE / OTA");
-    String w = String("WiFi AP: ") + (Remote::wifiActive() ? "ON" : "off");
-    String b = String("BLE:     ") + (Remote::bleActive() ? (Remote::bleConnected() ? "CONNECTED" : "ON") : "off");
-    for (uint8_t i = 0; i < 2; i++) {
-        const int16_t y = 12 + i * 9;
-        if (i == cursor) {
-            oled.fillRect(0, y - 1, 128, 9, SSD1306_WHITE);
-            oled.setTextColor(SSD1306_BLACK);
-        }
-        text(2, y, i == 0 ? w : b);
-        oled.setTextColor(SSD1306_WHITE);
-    }
+    header("WiFi / OTA");
+    gfx.fillRect(0, 11, 128, 9, COLOR_ON);
+    gfx.setTextColor(COLOR_OFF);
+    text(2, 12, String("WiFi AP: ") + (Remote::wifiActive() ? "ON" : "off"));
+    gfx.setTextColor(COLOR_ON);
     if (Remote::wifiActive()) {
-        text(0, 34, Remote::ssid());
-        text(0, 43, String("pw ") + cfg.hw.wifiPass);
-        text(0, 52, "http://192.168.4.1");
-    } else if (Remote::bleActive()) {
-        text(0, 34, "Name: ELRSTx");
-        text(0, 43, "Nordic UART service");
+        text(0, 30, Remote::ssid());
+        text(0, 39, String("pw ") + cfg.hw.wifiPass);
+        text(0, 48, "http://192.168.4.1");
+    } else {
+        text(0, 30, "OK = turn WiFi on");
     }
 }
 
@@ -500,11 +630,62 @@ String settingItem(uint8_t i) {
 
 String profileItem(uint8_t i) { return String(i) + " " + profileNames[i] + (i == cfg.profile ? " *" : ""); }
 
+String elrsItem(uint8_t i) {
+    using namespace ElrsParams;
+    Param p;
+    if (!param(elrsIds[i], p)) return "";
+    String name = p.name;
+    if (p.type == T_COMMAND) return "[" + name.substring(0, 18) + "]";
+    const bool edited = editing && i == cursor;
+    String v = p.type == T_FOLDER ? String(">") : valueText(p, edited ? elrsEditValue : p.value);
+    if (v.length() > 11) v = v.substring(0, 11);
+    if (edited) v = "<" + v + ">";
+    const int room = 20 - (int)v.length() - 1;
+    if ((int)name.length() > room) name = name.substring(0, max(room, 0));
+    while (name.length() + v.length() < 20) name += ' ';
+    return name + v;
+}
+
+void drawElrs() {
+    using namespace ElrsParams;
+    const Status s = status();
+    if (elrsCmdId) {
+        Param p;
+        param(elrsCmdId, p);
+        header(p.name);
+        text(0, 14, p.text[0] ? p.text : "...");
+        const char* hint = p.value == CMD_ASK_CONFIRM ? "OK=confirm BACK=no"
+                         : p.value == CMD_EXECUTING   ? "Running.. BACK=stop"
+                                                      : "OK=close";
+        text(0, 56, hint);
+        return;
+    }
+    String title = "ExpressLRS";
+    Param folder;
+    if (elrsFolder && param(elrsFolder, folder)) title = folder.name;
+    if (!elrsFolder && s.message[0]) title = s.message;
+    if (title.length() > 15) title = title.substring(0, 15);
+    if (!s.fieldCount) {
+        header(title.c_str());
+        text(0, 14, "Waiting for module");
+        text(0, 23, "check CRSF wiring");
+        return;
+    }
+    if (!elrsCount) {
+        header(title.c_str());
+        text(0, 14, String("Loading ") + s.loadedCount + "/" + s.fieldCount);
+        return;
+    }
+    drawList(title.c_str(), elrsCount, elrsItem);
+    if (s.loading) text(122, 0, "*");
+}
+
 void draw() {
-    oled.clearDisplay();
+    gfx.fillScreen(COLOR_OFF);
     switch (screen) {
     case HOME: drawHome(); break;
     case MENU: drawList("Menu", MENU_COUNT, menuItem); break;
+    case ELRS: drawElrs(); break;
     case CHANNELS: drawChannels(); break;
     case TELEMETRY: drawTelemetry(); break;
     case CALIBRATE: drawCalibrate(); break;
@@ -513,7 +694,7 @@ void draw() {
     case REMOTE: drawRemote(); break;
     case INFO: drawInfo(); break;
     }
-    oled.display();
+    present();
 }
 
 }  // namespace
@@ -526,7 +707,9 @@ void UI::begin() {
 #endif
     setLed(0, 0, 30);
 
-    Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);
+#if DISPLAY_TYPE == DISPLAY_SSD1306 || INPUTS_VIA_EXPANDER
+    Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);  // the ST7789 reuses these pins on the DevKit
+#endif
 #if INPUTS_VIA_EXPANDER
     Wire.beginTransmission(I2C_ADDR_EXPANDER);
     expOk = Wire.endTransmission() == 0;
@@ -540,15 +723,14 @@ void UI::begin() {
     expOk = true;
 #endif
 
-    Wire.beginTransmission(I2C_ADDR_OLED);
-    oledOk = Wire.endTransmission() == 0 && oled.begin(SSD1306_SWITCHCAPVCC, I2C_ADDR_OLED, true, false);
-    if (oledOk) {
-        oled.setTextSize(1);
-        oled.setTextColor(SSD1306_WHITE);
-        oled.clearDisplay();
+    displayFound = displayBegin();
+    if (displayFound) {
+        gfx.setTextSize(1);
+        gfx.setTextColor(COLOR_ON);
+        gfx.fillScreen(COLOR_OFF);
         text(28, 20, "ELRSTx " FW_VERSION);
         text(28, 34, "starting...");
-        oled.display();
+        present();
     }
     cfg = Config::get();
 }
@@ -563,17 +745,22 @@ void UI::loop() {
 
     const uint8_t inputs = readInputs();
     State::auxSwitches.store((inputs >> EXP_SW_FIRST) & 0x0F, std::memory_order_relaxed);
+    if (screen == ELRS) {
+        ElrsParams::touch();
+        elrsCount = ElrsParams::children(elrsFolder, elrsIds, sizeof(elrsIds));
+        if (cursor >= elrsCount) cursor = elrsCount ? elrsCount - 1 : 0;
+    }
     handleButtons(edges(inputs & 0x0F));
     Calibration::update(st.raw);
 
     updateAlarms();
     updateIndicators();
 
-    if (oledOk && nowMs - lastDrawMs >= 100) {
+    if (displayFound && nowMs - lastDrawMs >= 100) {
         lastDrawMs = nowMs;
         draw();
     }
 }
 
-bool UI::displayOk() { return oledOk; }
+bool UI::displayOk() { return displayFound; }
 bool UI::expanderOk() { return expOk; }
