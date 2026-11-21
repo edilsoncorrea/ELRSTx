@@ -24,8 +24,7 @@ struct HomeView {
     Level alarm;
     const char* alarmText;
     const char* flightMode;
-    char axisLetter[4];       // R P T Y
-    float stick[4];           // 0..1
+    float gimbal[2][2];       // [left, right][x, y], 0..1, y = 1 at the top
     bool aux[4];
 };
 

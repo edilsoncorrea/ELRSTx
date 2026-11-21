@@ -110,6 +110,18 @@ void bar(int16_t x, int16_t y, int16_t w, int16_t h, float f, uint16_t color) {
     g->fillRect(x + 2, y + 2, (int16_t)((w - 4) * f), h - 4, color);
 }
 
+// Square with a dot at the stick position (EdgeTX style)
+constexpr int16_t GIMBAL = 70;
+void gimbal(int16_t x, int16_t y, const float* pos) {
+    constexpr int16_t R = 6;
+    g->drawRect(x, y, GIMBAL, GIMBAL, OUTLINE);
+    g->drawFastHLine(x + 1, y + GIMBAL / 2, GIMBAL - 2, HEADER_BG);
+    g->drawFastVLine(x + GIMBAL / 2, y + 1, GIMBAL - 2, HEADER_BG);
+    const int16_t px = x + R + 2 + (int16_t)(pos[0] * (GIMBAL - 2 * R - 4));
+    const int16_t py = y + R + 2 + (int16_t)((1 - pos[1]) * (GIMBAL - 2 * R - 4));
+    g->fillCircle(px, py, R, ACCENT);
+}
+
 }  // namespace
 
 bool begin() {
@@ -172,25 +184,20 @@ void home(const HomeView& v) {
             text(8, 129, v.flightMode, ACCENT);
         }
 
-        // Sticks
-        for (uint8_t a = 0; a < 4; a++) {
-            const int16_t x = 8 + a * 58;
-            const char l[2] = {v.axisLetter[a], 0};
-            text(x + 22, 158, l, DIM, 1);
-            bar(x, 168, 52, 14, v.stick[a], ACCENT);
-        }
-
-        // AUX switches
+        // Gimbals in the bottom corners, AUX switches 2x2 between them
+        gimbal(8, 160, v.gimbal[0]);
+        gimbal(SIZE - 8 - GIMBAL, 160, v.gimbal[1]);
         for (uint8_t i = 0; i < 4; i++) {
-            const int16_t x = 8 + i * 58;
+            const int16_t x = 86 + (i % 2) * 36;
+            const int16_t y = 162 + (i / 2) * 36;
             char l[4];
             snprintf(l, sizeof(l), "A%u", i + 1);
             if (v.aux[i]) {
-                g->fillRoundRect(x, 196, 52, 30, 4, GOOD);
-                text(x + 14, 203, l, BG);
+                g->fillRoundRect(x, y, 32, 32, 4, GOOD);
+                text(x + 4, y + 9, l, BG);
             } else {
-                g->drawRoundRect(x, 196, 52, 30, 4, OUTLINE);
-                text(x + 14, 203, l, DIM);
+                g->drawRoundRect(x, y, 32, 32, 4, OUTLINE);
+                text(x + 4, y + 9, l, DIM);
             }
         }
     });

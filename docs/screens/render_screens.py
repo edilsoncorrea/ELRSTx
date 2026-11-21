@@ -114,24 +114,34 @@ class Mono:
             b = "%.1fV" % v["tx_batt"]
             self.t(128 - len(b) * 6, 0, b)
         self.g.fill_rect(0, 9, 128, 1, self.ON)
-        self.t(0, 12, v["device"])
+        if v["alarm"]:
+            self.inverted(12, v["alarm"][1])
+        else:
+            self.t(0, 12, v["device"])
         self.t(0, 21, "LQ %3u%%  -%udBm" % (v["lq"], v["rssi"]) if v["link"] else "No receiver link")
         rate = "%uHz" % v["rate"] + ("" if v["synced"] else " nosync")
         if v["rx_batt"]:
             rate += "  %.1fV" % v["rx_batt"]
         self.t(0, 30, rate)
-        if v["alarm"]:
-            self.g.fill_rect(0, 38, 128, 10, self.ON)
-            self.t(2, 39, v["alarm"][1], self.OFF)
-        elif v["mode"]:
-            self.t(0, 39, v["mode"])
-        for a in range(4):
-            self.bar(a * 32, 50, 30, 6, v["stick"][a])
+        self.gimbal(0, 40, v["gimbal"][0])
+        self.gimbal(104, 40, v["gimbal"][1])
+        if v["mode"]:
+            m = v["mode"][:12]
+            self.t(64 - len(m) * 3, 42, m)
         for i in range(4):
+            x = 33 + i * 17
             if v["aux"][i]:
-                self.g.fill_rect(i * 32 + 11, 58, 8, 6, self.ON)
+                self.g.fill_rect(x, 56, 11, 7, self.ON)
             else:
-                self.g.rect(i * 32 + 11, 58, 8, 6, self.ON)
+                self.g.rect(x, 56, 11, 7, self.ON)
+
+    def gimbal(self, x, y, pos):
+        S = 24
+        self.g.rect(x, y, S, S, self.ON)
+        self.g.fill_rect(x + S // 2, y + S // 2, 1, 1, self.ON)
+        px = x + 3 + int(pos[0] * (S - 7))
+        py = y + 3 + int((1 - pos[1]) * (S - 7))
+        self.g.d.ellipse([px - 2, py - 2, px + 2, py + 2], fill=self.ON)
 
     def list(self, v):
         self.header(v["title"])
@@ -261,18 +271,24 @@ class Color:
             self.t((240 - width(v["alarm"][1])) // 2, 129, v["alarm"][1], self.BG)
         elif v["mode"]:
             self.t(8, 129, v["mode"], self.ACCENT)
-        for a in range(4):
-            x = 8 + a * 58
-            self.t(x + 22, 158, "RPTY"[a], self.DIM, 1)
-            self.bar(x, 168, 52, 14, v["stick"][a], self.ACCENT)
+        self.gimbal(8, 160, v["gimbal"][0])
+        self.gimbal(240 - 8 - 70, 160, v["gimbal"][1])
         for i in range(4):
-            x = 8 + i * 58
+            x, y = 86 + (i % 2) * 36, 162 + (i // 2) * 36
             if v["aux"][i]:
-                self.g.round_rect(x, 196, 52, 30, 4, self.GOOD)
-                self.t(x + 14, 203, "A%d" % (i + 1), self.BG)
+                self.g.round_rect(x, y, 32, 32, 4, self.GOOD)
+                self.t(x + 4, y + 9, "A%d" % (i + 1), self.BG)
             else:
-                self.g.round_rect(x, 196, 52, 30, 4, self.OUTLINE, fill=False)
-                self.t(x + 14, 203, "A%d" % (i + 1), self.DIM)
+                self.g.round_rect(x, y, 32, 32, 4, self.OUTLINE, fill=False)
+                self.t(x + 4, y + 9, "A%d" % (i + 1), self.DIM)
+
+    def gimbal(self, x, y, pos, S=70, R=6):
+        self.g.rect(x, y, S, S, self.OUTLINE)
+        self.g.fill_rect(x + 1, y + S // 2, S - 2, 1, self.HEADER_BG)
+        self.g.fill_rect(x + S // 2, y + 1, 1, S - 2, self.HEADER_BG)
+        px = x + R + 2 + int(pos[0] * (S - 2 * R - 4))
+        py = y + R + 2 + int((1 - pos[1]) * (S - 2 * R - 4))
+        self.g.d.ellipse([px - R, py - R, px + R, py + R], fill=self.ACCENT)
 
     def list(self, v):
         rows, cur, n = v["rows"], v["cursor"], self.LIST_ROWS
@@ -360,7 +376,7 @@ class Color:
 CH = [992, 1210, 172, 940, 1811, 172, 992, 172, 1400, 992, 600, 992, 992, 992, 992, 992]
 HOME = dict(title="Model 1", tx_batt=7.8, tx_level=None, device="DIY2400 TX ESP32 SX", link=True, lq=100,
             rssi=42, rate=250, synced=True, rx_batt=12.4, alarm=None, mode="ANGL",
-            stick=[frac(CH[i]) for i in (0, 1, 2, 3)], aux=[c > 992 for c in CH[4:8]])
+            gimbal=[(frac(CH[0]), frac(CH[2])), (frac(CH[3]), frac(CH[1]))], aux=[c > 992 for c in CH[4:8]])
 ELRS_ROOT = [dict(label="Packet Rate", value="250Hz(-108dBm)"), dict(label="Telem Ratio", value="Std"),
              dict(label="Switch Mode", value="Wide"), dict(label="Model Match", value="Off"),
              dict(label="TX Power", folder=True), dict(label="VTX Administrator", folder=True),
@@ -375,7 +391,7 @@ SCREENS = [
     ("00-splash", "Inicializacao", lambda d: d.splash("2.1.0")),
     ("01-home", "Inicial", lambda d: d.home(HOME)),
     ("02-home-alarm", "Inicial com alarme",
-     lambda d: d.home(dict(HOME, link=False, alarm=("crit", "LINK LOST"), tx_batt=6.9, tx_level="warn"))),
+     lambda d: d.home(dict(HOME, link=False, alarm=("crit", "LINK LOST"), gimbal=[(0.5, 0.0), (0.5, 0.5)], tx_batt=6.9, tx_level="warn"))),
     ("03-menu", "Menu", lambda d: d.list(dict(title="Menu", cursor=0, rows=[dict(label=l) for l in [
         "ExpressLRS", "Channels", "Telemetry", "Calibrate", "Settings", "Profiles", "WiFi / OTA", "Info"]]))),
     ("04-elrs", "ExpressLRS", lambda d: d.list(dict(title="ExpressLRS", cursor=0, rows=ELRS_ROOT))),

@@ -407,10 +407,12 @@ void showHome() {
     v.alarm = alarmLevel == ALARM_CRIT ? Level::Crit : alarmLevel == ALARM_WARN ? Level::Warn : Level::None;
     v.alarmText = alarmText;
     v.flightMode = st.telem.flightMode;
-    for (uint8_t a = 0; a < AXIS_COUNT; a++) {
-        v.axisLetter[a] = toupper(Config::axisName(a)[0]);
-        v.stick[a] = Display::channelFraction(st.channels[cfg.model.channel[a]]);
-    }
+    // Physical sticks (Pins.h): left = roll X / throttle Y, right = yaw X / pitch Y
+    auto axis = [&](uint8_t a) { return Display::channelFraction(st.channels[cfg.model.channel[a]]); };
+    v.gimbal[0][0] = axis(AXIS_ROLL);
+    v.gimbal[0][1] = axis(AXIS_THROTTLE);
+    v.gimbal[1][0] = axis(AXIS_YAW);
+    v.gimbal[1][1] = axis(AXIS_PITCH);
     for (uint8_t i = 0; i < AUX_COUNT; i++) v.aux[i] = st.channels[AUX_FIRST_CHANNEL + i] > CRSF_CHANNEL_VALUE_MID;
     Display::home(v);
 }

@@ -32,6 +32,16 @@ void bar(int16_t x, int16_t y, int16_t w, int16_t h, float f) {
     oled.fillRect(x + 1, y + 1, (int16_t)((w - 2) * f), h - 2, ON);
 }
 
+// Square with a dot at the stick position (EdgeTX style), 24x24
+void gimbal(int16_t x, int16_t y, const float* pos) {
+    constexpr int16_t S = 24;
+    oled.drawRect(x, y, S, S, ON);
+    oled.drawPixel(x + S / 2, y + S / 2, ON);
+    const int16_t px = x + 3 + (int16_t)(pos[0] * (S - 7));
+    const int16_t py = y + 3 + (int16_t)((1 - pos[1]) * (S - 7));
+    oled.fillCircle(px, py, 2, ON);
+}
+
 void inverted(int16_t y, const char* s) {
     oled.fillRect(0, y - 1, 128, 9, ON);
     oled.setTextColor(OFF);
@@ -86,7 +96,9 @@ void home(const HomeView& v) {
     }
     oled.drawFastHLine(0, 9, 128, ON);
 
-    text(0, 12, !v.moduleAlive ? "No ELRS module" : v.deviceName[0] ? v.deviceName : "ELRS module OK");
+    // An alarm takes the module line, inverted
+    if (v.alarm != Level::None) inverted(12, v.alarmText);
+    else text(0, 12, !v.moduleAlive ? "No ELRS module" : v.deviceName[0] ? v.deviceName : "ELRS module OK");
 
     if (v.link) snprintf(buf, sizeof(buf), "LQ %3u%%  -%udBm", v.lq, v.rssi);
     else snprintf(buf, sizeof(buf), "No receiver link");
@@ -97,19 +109,17 @@ void home(const HomeView& v) {
     if (v.rxBatteryValid) rate += "  " + String(v.rxBatteryDv / 10.0f, 1) + "V";
     text(0, 30, rate.c_str());
 
-    if (v.alarm != Level::None) {
-        oled.fillRect(0, 38, 128, 10, ON);
-        oled.setTextColor(OFF);
-        text(2, 39, v.alarmText);
-        oled.setTextColor(ON);
-    } else if (v.flightMode[0]) {
-        text(0, 39, v.flightMode);
+    // Gimbals in the bottom corners, flight mode and AUX switches between them
+    gimbal(0, 40, v.gimbal[0]);
+    gimbal(104, 40, v.gimbal[1]);
+    if (v.flightMode[0]) {
+        String m = String(v.flightMode).substring(0, 12);
+        text(64 - m.length() * 3, 42, m.c_str());
     }
-
-    for (uint8_t a = 0; a < 4; a++) bar(a * 32, 50, 30, 6, v.stick[a]);
     for (uint8_t i = 0; i < 4; i++) {
-        if (v.aux[i]) oled.fillRect(i * 32 + 11, 58, 8, 6, ON);
-        else oled.drawRect(i * 32 + 11, 58, 8, 6, ON);
+        const int16_t x = 33 + i * 17;
+        if (v.aux[i]) oled.fillRect(x, 56, 11, 7, ON);
+        else oled.drawRect(x, 56, 11, 7, ON);
     }
     oled.display();
 }
