@@ -1,4 +1,7 @@
 #include "CRSF.h"
+#include <driver/gpio.h>
+#include <esp_rom_gpio.h>
+#include <soc/gpio_sig_map.h>
 
 // CRC8 DVB-S2 (poly 0xD5)
 static const uint8_t crc8_dvb_s2_table[256] = {
@@ -30,8 +33,55 @@ CRSF::CRSF() : _serial(nullptr), _rxPos(0) {
     memset(&_telem, 0, sizeof(_telem));
 }
 
-void CRSF::begin(HardwareSerial &serial) {
+void CRSF::begin(HardwareSerial &serial, int8_t rxPin, int8_t txPin, uint32_t baud) {
     _serial = &serial;
+    _halfDuplex = rxPin == txPin;
+    _pin = rxPin;
+    serial.setRxBufferSize(1024);
+    if (_halfDuplex) {
+        // RX only through the driver; TX is attached to the same pin only while sending
+        serial.begin(baud, SERIAL_8N1, rxPin, -1, false);
+        lineToRx();
+    } else {
+        serial.begin(baud, SERIAL_8N1, rxPin, txPin, false);
+    }
+}
+
+// Same switching as ExpressLRS's own half-duplex CRSF on ESP32: the UART signals are
+// routed through the GPIO matrix, inverted there (idle low, as on the JR bay).
+void CRSF::lineToTx() {
+    gpio_set_pull_mode((gpio_num_t)_pin, GPIO_FLOATING);
+    gpio_set_level((gpio_num_t)_pin, 0);
+    gpio_set_direction((gpio_num_t)_pin, GPIO_MODE_OUTPUT);
+    // While sending, the UART RX sees a constant idle level instead of our own echo
+    esp_rom_gpio_connect_in_signal(GPIO_MATRIX_CONST_ONE_INPUT, U1RXD_IN_IDX, false);
+    esp_rom_gpio_connect_out_signal(_pin, U1TXD_OUT_IDX, true, false);
+}
+
+void CRSF::lineToRx() {
+    gpio_set_direction((gpio_num_t)_pin, GPIO_MODE_INPUT);
+    gpio_pulldown_en((gpio_num_t)_pin);  // idle low when nobody drives the line
+    gpio_pullup_dis((gpio_num_t)_pin);
+    esp_rom_gpio_connect_in_signal(_pin, U1RXD_IN_IDX, true);
+}
+
+void CRSF::queue(const uint8_t* data, uint8_t len) {
+    if (_txLen + len > sizeof(_tx)) transmit();
+    memcpy(&_tx[_txLen], data, len);
+    _txLen += len;
+}
+
+void CRSF::transmit() {
+    if (_serial == nullptr || _txLen == 0) return;
+    if (_halfDuplex) {
+        lineToTx();
+        _serial->write(_tx, _txLen);
+        _serial->flush();  // returns when the last stop bit has left the pin
+        lineToRx();
+    } else {
+        _serial->write(_tx, _txLen);
+    }
+    _txLen = 0;
 }
 
 void CRSF::setChannel(uint8_t channel, uint16_t value) {
@@ -82,7 +132,7 @@ void CRSF::sendRCFrame(uint8_t* captureBuffer) {
     uint8_t frame[CRSF_RC_FRAME_SIZE];
     buildRCFrame(frame);
     if (captureBuffer != nullptr) memcpy(captureBuffer, frame, sizeof(frame));
-    _serial->write(frame, sizeof(frame));
+    queue(frame, sizeof(frame));
 }
 
 void CRSF::sendDevicePing() {
@@ -99,7 +149,7 @@ void CRSF::sendExtendedFrame(uint8_t type, uint8_t dest, const uint8_t* payload,
     frame[4] = CRSF_ADDRESS_RADIO;
     if (len) memcpy(&frame[5], payload, len);
     frame[5 + len] = crc8(&frame[2], len + 3);
-    _serial->write(frame, len + 6);
+    queue(frame, len + 6);
 }
 
 void CRSF::processByte(uint8_t b, uint32_t nowMs) {

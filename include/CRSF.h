@@ -80,7 +80,10 @@ class CRSF {
 public:
     CRSF();
 
-    void begin(HardwareSerial &serial);
+    // Uses UART1 (Serial1). rxPin == txPin: one wire, half-duplex, inverted, like a
+    // radio's JR bay S.Port pin. Different pins: two-wire full duplex, not inverted.
+    void begin(HardwareSerial &serial, int8_t rxPin, int8_t txPin, uint32_t baud);
+    bool halfDuplex() const { return _halfDuplex; }
 
     void setChannel(uint8_t channel, uint16_t value);
     uint16_t getChannel(uint8_t channel);
@@ -96,6 +99,10 @@ public:
     using ExtendedHandler = void (*)(uint8_t type, const uint8_t* payload, uint8_t len, uint32_t nowMs);
     void setExtendedHandler(ExtendedHandler handler) { _extHandler = handler; }
 
+    // send* calls only queue; transmit() sends the cycle's frames in one burst, so in
+    // half-duplex the line is released once and the module can answer (telemetry)
+    void transmit();
+
     void processByte(uint8_t b, uint32_t nowMs);
     const CRSFTelemetry& telemetry() const { return _telem; }
 
@@ -103,6 +110,13 @@ public:
 
 private:
     HardwareSerial *_serial;
+    bool _halfDuplex = false;
+    int8_t _pin = -1;
+    uint8_t _tx[128];
+    uint8_t _txLen = 0;
+    void queue(const uint8_t* data, uint8_t len);
+    void lineToTx();
+    void lineToRx();
     ExtendedHandler _extHandler = nullptr;
     uint16_t _channels[CRSF_MAX_CHANNELS];
     CRSFTelemetry _telem;

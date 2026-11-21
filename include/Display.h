@@ -1,9 +1,11 @@
 #pragma once
 #include <Arduino.h>
+#include "Hardware.h"
 
 // Display HAL. UI.cpp decides WHAT is shown and fills these views; each driver
 // (DisplaySSD1306.cpp, DisplayST7789.cpp, DisplayNone.cpp) decides HOW: layout,
-// fonts, colours and how much fits. Only the driver chosen by DISPLAY_TYPE is built.
+// fonts, colours and how much fits. All drivers are built in; hardware.json
+// ("display") picks one at boot through create().
 namespace Display {
 
 enum class Level : uint8_t { None, Warn, Crit };
@@ -69,13 +71,23 @@ struct MessageView {
     const char* footer;               // bottom hint, nullptr = none
 };
 
-bool begin();  // false when no display is fitted or detected
-void splash(const char* version);
-void home(const HomeView& v);
-void list(const ListView& v);
-void channels(const uint16_t* ch, uint8_t count);  // CRSF values 172..1811
-void telemetry(const TelemetryView& v);
-void message(const MessageView& v);
+class Driver {
+public:
+    virtual ~Driver() = default;
+    // false when the display is not detected; hw has the pins (Wire is already started for I2C)
+    virtual bool begin(const HardwareConfig& hw) = 0;
+    virtual void splash(const char* version) = 0;
+    virtual void home(const HomeView& v) = 0;
+    virtual void list(const ListView& v) = 0;
+    virtual void channels(const uint16_t* ch, uint8_t count) = 0;  // CRSF values 172..1811
+    virtual void telemetry(const TelemetryView& v) = 0;
+    virtual void message(const MessageView& v) = 0;
+};
+
+Driver* create(DisplayType type);
+Driver* createSsd1306();
+Driver* createSt7789();
+Driver* createNone();
 
 // Helpers shared by the drivers
 inline float channelFraction(uint16_t v) { return constrain((v - 172) / 1639.0f, 0.0f, 1.0f); }

@@ -1,0 +1,38 @@
+{
+  "joy_roll": 36,
+  "joy_pitch": 35,
+  "joy_throttle": 39,
+  "joy_yaw": 34,
+  "battery": 32,
+
+  "crsf_rx": 17,
+  "crsf_tx": 17,
+  "crsf_baud": 400000,
+
+  "inputs": "gpio",
+  "btn_up": 4,
+  "btn_down": 13,
+  "btn_ok": 14,
+  "btn_back": 27,
+  "aux1": 18,
+  "aux2": 19,
+  "aux3": 23,
+  "aux4": 26,
+  "expander_addr": 32,
+
+  "i2c_sda": 21,
+  "i2c_scl": 22,
+
+  "display": "ssd1306",
+  "oled_addr": 60,
+  "tft_sclk": 22,
+  "tft_mosi": 21,
+  "tft_dc": 33,
+  "tft_rst": 5,
+  "tft_rotation": 0,
+
+  "led": 2,
+  "led_rgb": false,
+  "led_active_low": false,
+  "buzzer": 25
+}

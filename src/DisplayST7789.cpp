@@ -3,14 +3,13 @@
 // A full 240x240x16-bit frame (115 KB) does not reliably fit in one heap block next to
 // WiFi, so each frame is drawn in horizontal bands: the screen function runs once per
 // band into a small buffer, which is then pushed to the panel. No flicker, 19 KB RAM.
-#include "Pins.h"
-#if DISPLAY_TYPE == DISPLAY_ST7789
 #include <SPI.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7789.h>
 #include "Display.h"
 
 namespace Display {
+namespace st7789 {
 namespace {
 
 constexpr int16_t SIZE = 240;
@@ -63,23 +62,23 @@ public:
     }
 };
 
-Adafruit_ST7789 tft(&SPI, -1, PIN_TFT_DC, PIN_TFT_RST);
+Adafruit_ST7789* tft = nullptr;
 Band* band = nullptr;
 Adafruit_GFX* g = nullptr;
 uint8_t scroll = 0;
 
 template <typename F>
 void render(F draw) {
-    tft.startWrite();
+    tft->startWrite();
     for (int16_t top = 0; top < SIZE; top += BAND_H) {
         band->top = top;
         band->fillScreen(BG);
         g->setTextWrap(false);
         draw();
-        tft.setAddrWindow(0, top, SIZE, BAND_H);
-        tft.writePixels(band->buf, SIZE * BAND_H);
+        tft->setAddrWindow(0, top, SIZE, BAND_H);
+        tft->writePixels(band->buf, SIZE * BAND_H);
     }
-    tft.endWrite();
+    tft->endWrite();
 }
 
 void text(int16_t x, int16_t y, const char* s, uint16_t color = FG, uint8_t size = 2) {
@@ -124,15 +123,16 @@ void gimbal(int16_t x, int16_t y, const float* pos) {
 
 }  // namespace
 
-bool begin() {
-    static Band b;
-    band = &b;
-    g = &b;
-    SPI.begin(PIN_TFT_SCLK, -1, PIN_TFT_MOSI, -1);
-    tft.init(SIZE, SIZE, SPI_MODE3);  // 240x240 modules without a CS pin need mode 3
-    tft.setSPISpeed(40000000);
-    tft.setRotation(TFT_ROTATION);
-    tft.fillScreen(BG);
+bool begin(const HardwareConfig& hw) {
+    // Allocated only when this display is selected (19 KB band + driver)
+    band = new Band();
+    g = band;
+    tft = new Adafruit_ST7789(&SPI, -1, hw.tftDc, hw.tftRst);
+    SPI.begin(hw.tftSclk, -1, hw.tftMosi, -1);
+    tft->init(SIZE, SIZE, SPI_MODE3);  // 240x240 modules without a CS pin need mode 3
+    tft->setSPISpeed(40000000);
+    tft->setRotation(hw.tftRotation);
+    tft->fillScreen(BG);
     return true;  // write-only bus, presence cannot be detected
 }
 
@@ -319,5 +319,22 @@ void message(const MessageView& v) {
     });
 }
 
+}  // namespace st7789
+
+class St7789 : public Driver {
+public:
+    bool begin(const HardwareConfig& hw) override { return st7789::begin(hw); }
+    void splash(const char* version) override { st7789::splash(version); }
+    void home(const HomeView& v) override { st7789::home(v); }
+    void list(const ListView& v) override { st7789::list(v); }
+    void channels(const uint16_t* ch, uint8_t count) override { st7789::channels(ch, count); }
+    void telemetry(const TelemetryView& v) override { st7789::telemetry(v); }
+    void message(const MessageView& v) override { st7789::message(v); }
+};
+
+Driver* createSt7789() {
+    static St7789 d;
+    return &d;
+}
+
 }  // namespace Display
-#endif

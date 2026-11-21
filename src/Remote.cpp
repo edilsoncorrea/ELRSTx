@@ -4,6 +4,7 @@
 #include <ArduinoOTA.h>
 #include "Commands.h"
 #include "Config.h"
+#include "Hardware.h"
 
 namespace {
 
@@ -32,8 +33,9 @@ fieldset{border:1px solid #444;border-radius:6px;margin:12px 0}
 <button onclick="run('help')">Help</button>
 </div>
 <pre id="out"></pre></fieldset>
+<p><a href="/hardware" style="color:#6cf">Hardware (pins, display, CRSF)</a></p>
 <fieldset><legend>Firmware update (OTA)</legend>
-<p>Upload .pio/build/esp32-c3-devkitm-1/firmware.bin. Never update while flying.</p>
+<p>Upload .pio/build/&lt;env&gt;/firmware.bin. Never update while flying.</p>
 <form method="POST" action="/update" enctype="multipart/form-data">
 <input type="file" name="fw" accept=".bin"><button>Upload</button></form></fieldset>
 <script>
@@ -49,9 +51,44 @@ async function poll(){
 poll();
 </script></body></html>)HTML";
 
+const char HW_PAGE[] = R"HTML(<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ELRSTx hardware</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:680px;margin:auto;padding:12px;background:#111;color:#eee}
+textarea{width:100%;height:60vh;background:#1d1d1d;color:#eee;font:14px monospace;border-radius:4px}
+button{font-size:16px;padding:6px 10px;margin:2px}#msg{white-space:pre-wrap}
+</style></head><body>
+<h2>hardware.json</h2>
+<p>Pins, display and CRSF wiring. Saved changes apply after a reboot. <b>Disarm and land first.</b>
+crsf_rx = crsf_tx means one wire (half-duplex, inverted, like a JR bay).
+If the radio stops responding: hold OK while powering on, or send <code>hw reset</code> over serial.</p>
+<textarea id="j" spellcheck="false"></textarea>
+<div><button onclick="save()">Save</button><button onclick="load('/hardware.json?default=1')">Built-in</button>
+<button onclick="reboot()">Reboot</button> <a href="/" style="color:#6cf">back</a></div>
+<p id="msg"></p>
+<script>
+async function load(u){const r=await fetch(u||'/hardware.json');document.getElementById('j').value=await r.text();}
+async function save(){
+  const r=await fetch('/hardware.json',{method:'POST',headers:{'Content-Type':'application/json'},body:document.getElementById('j').value});
+  document.getElementById('msg').textContent=await r.text();
+}
+async function reboot(){await fetch('/cmd',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'c=reboot'});}
+load();
+</script></body></html>)HTML";
+
 void setupRoutes() {
     server.on("/", HTTP_GET, [] { server.send(200, "text/html", PAGE); });
     server.on("/status", HTTP_GET, [] { server.send(200, "text/plain", Commands::statusText()); });
+    server.on("/hardware", HTTP_GET, [] { server.send(200, "text/html", HW_PAGE); });
+    server.on("/hardware.json", HTTP_GET, [] {
+        server.send(200, "application/json", server.hasArg("default") ? Hardware::defaultJson() : Hardware::savedJson());
+    });
+    server.on("/hardware.json", HTTP_POST, [] {
+        String err;
+        if (Hardware::save(server.arg("plain"), err)) server.send(200, "text/plain", "Saved. Reboot to apply.");
+        else server.send(400, "text/plain", "Not saved: " + err);
+    });
     server.on("/cmd", HTTP_POST, [] { server.send(200, "text/plain", Commands::execute(server.arg("c"))); });
     server.on(
         "/update", HTTP_POST,

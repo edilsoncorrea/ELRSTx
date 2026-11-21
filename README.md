@@ -11,8 +11,10 @@ Rádio com dois joysticks analógicos, quatro switches e um OLED, que controla u
 - **5 perfis de modelo** salvos na flash (NVS, com checksum)
 - **Segurança**: safe start (acelerador e arm bloqueados no boot até acelerador baixo + arm desligado), alarme de perda de link e de bateria baixa (LED + buzzer)
 - **Bateria do rádio** por divisor resistivo, com porcentagem para LiPo
-- **Display OLED 128x64** com menu: canais, telemetria, calibração, ajustes, perfis, WiFi/OTA e info
+- **Display OLED 128x64 ou IPS ST7789 240x240 colorido** com menu: canais, telemetria, calibração, ajustes, perfis, WiFi/OTA e info
 - **Configuração do módulo ExpressLRS** pelo rádio, como o script Lua do EdgeTX: taxa de pacotes, telemetria, potência, Bind, WiFi do módulo, Model Match e demais opções, lidas do próprio módulo
+- **Pinagem, display e ligação do CRSF num `hardware.json`**, como no ExpressLRS: muda pelo serial ou pela web, sem recompilar
+- **CRSF de um fio** (half-duplex invertido, como a baia JR de um rádio comum) ou de dois fios
 - **WiFi AP** com página web de status, comandos e **atualização OTA**; também OTA pelo PlatformIO
 
 > **Failsafe:** quando o link cai, o rádio não consegue mais falar com o modelo. O comportamento do aeromodelo na perda de sinal é configurado no receptor/controladora de voo (ex.: Betaflight → Failsafe). O rádio cuida do safe start e dos alarmes.
@@ -31,7 +33,7 @@ Pinagem completa das duas, comparação e a opção ESP32-S3: **[docs/HARDWARE.m
 ## Hardware (DevKit)
 
 - ESP32 DevKit (ESP32-WROOM-32)
-- Módulo ExpressLRS TX com **UART de 2 pinos** (TX/RX separados)
+- Módulo ExpressLRS TX: **um fio** (padrão, como a baia JR) ou UART de 2 pinos
 - 2 joysticks analógicos 3.3 V
 - 4 botões de menu + 4 switches (entre o pino e o GND)
 - OLED 0.96" SSD1306 128x64 I2C de 4 pinos (0x3C) — opcional
@@ -44,11 +46,13 @@ Pinagem completa das duas, comparação e a opção ESP32-S3: **[docs/HARDWARE.m
 | 34 / 35 | Joystick direito X (Yaw) / Y (Pitch) |
 | 32 | Bateria |
 | 21 / 22 | I2C SDA / SCL (OLED) |
-| 16 / 17 | CRSF RX ← TX do módulo / CRSF TX → RX do módulo |
+| 17 | CRSF, um fio até o pino CRSF do módulo (com dois fios: 16 RX ← TX do módulo, 17 TX → RX do módulo) |
 | 2 | LED da placa |
 | 25 | Buzzer |
 | 4 / 13 / 14 / 27 | Botões cima / baixo / OK / voltar |
 | 18 / 19 / 23 / 26 | AUX1 (arm) / AUX2 / AUX3 / AUX4 |
+
+Essa é a pinagem padrão do [hardware/esp32dev.json](hardware/esp32dev.json); veja [Pinagem e hardware.json](#pinagem-e-hardwarejson).
 
 O módulo detecta o baud automaticamente entre `400000, 115200, 921600, 1870000, ...`. **420000 não funciona** — essa é a velocidade entre receptor e controladora de voo.
 
@@ -65,7 +69,7 @@ No primeiro boot, os testes unitários rodam e o resultado aparece no monitor. D
 ## Primeiros passos
 
 1. Grave o firmware e abra o monitor. A linha de status mostra `module ok` quando o módulo responde.
-2. Digite `status`. Se aparecer `NOT RESPONDING`, confira os fios RX/TX (cruzados), o GND e se o módulo está ligado.
+2. Digite `status`. Se aparecer `NOT RESPONDING`, confira o fio do CRSF (ou os dois, cruzados), o GND, se o módulo está ligado e se `crsf_rx`/`crsf_tx` combinam com o `serial_rx`/`serial_tx` do módulo.
 3. Calibre: `cal center` (sticks no centro), `cal start`, mova todos os sticks até o limite, `cal stop`. Ou use o menu **Calibrate**.
 4. Ligue o receptor: `status` deve mostrar LQ e RSSI.
 5. Abaixe o acelerador e desligue o AUX1 para liberar o safe start.
@@ -79,10 +83,12 @@ Model 1            7.6V   <- perfil e bateria do rádio
 ELRS 2.4G TX              <- nome do módulo (ou "No ELRS module")
 LQ 100%  -45dBm           <- link com o receptor
 250Hz  15.8V              <- taxa de envio e bateria do modelo
-[ THR DOWN + DISARM ]     <- alarme ativo, ou modo de voo
-[R===][P== ][T=  ][Y===]  <- posição dos 4 sticks
-   ■     □     □     □    <- AUX1..AUX4
+┌──┐    ANGL     ┌──┐   <- modo de voo
+│ •│  ■ □ □ □    │• │   <- sticks (quadrado com bolinha, como no EdgeTX) e AUX1..AUX4
+└──┘             └──┘
 ```
+
+Um alarme (ex.: `LINK LOST`) aparece em destaque no lugar do nome do módulo. Prévias das telas dos dois displays: [docs/screens/](docs/screens/).
 
 Menu: **ExpressLRS** (parâmetros do módulo TX: OK entra na pasta ou edita, cima/baixo muda o valor, OK grava, voltar cancela; comandos como Bind abrem uma janela de confirmação), **Channels** (barras e µs de CH1–8), **Telemetry** (RSSI/LQ/SNR, bateria, atitude, GPS, modo de voo), **Calibrate** (assistente em 2 passos), **Settings** (deadband, inversões, safe start, alarme de link, células e limites da bateria, simulação; grava ao sair), **Profiles** (5 modelos), **WiFi / OTA** (liga/desliga e mostra rede, senha e endereço) e **Info** (versão, frames, telemetria ok/ruim, memória, tempo ligado).
 
@@ -104,10 +110,39 @@ elrs                    parâmetros do módulo ExpressLRS
 elrs set <id> <valor>   altera um parâmetro (texto da opção ou índice)
 elrs cmd <id> [confirm|cancel]  executa um comando (Bind, WiFi...)
 elrs reload             relê os parâmetros
+hw                      hardware.json ativo (pinos, display, CRSF)
+hw set <chave> <valor>  altera uma chave (gravado, vale após reboot)
+hw saved | default      hardware.json pendente / embutido
+hw reset                apaga o hardware.json gravado
 reboot
 ```
 
 Chaves: `name`, `deadband`, `invert.<eixo>`, `map.<eixo>` (canal 1–4), `safestart`, `linkalarm`, `linktimeout`, `batt.ratio` ((R1+R2)/R2 × 1000), `batt.cells`, `batt.warn`, `batt.crit` (mV por célula), `cal.<eixo>` (`min,centro,max`), `wifipass`. Eixos: `roll pitch throttle yaw`.
+
+## Pinagem e hardware.json
+
+Como no ExpressLRS, os pinos não ficam fixos no código. Cada placa tem um arquivo padrão, [hardware/esp32dev.json](hardware/esp32dev.json) ou [hardware/esp32c3.json](hardware/esp32c3.json), que vai embutido no firmware. Para mudar sem recompilar:
+
+- **Serial:** `hw set display st7789`, `hw set crsf_rx 16`, ... e depois `reboot`.
+- **Web:** `wifi on`, abra `http://192.168.4.1/hardware`, edite o JSON, **Save** e **Reboot**.
+
+Tudo é validado antes de gravar: pinos repetidos, pinos da flash, analógicos fora do ADC1, pinos só de entrada usados como saída ou botão. As mudanças só valem depois de reiniciar. Se uma configuração errada deixar o rádio sem tela ou botões, **ligue segurando OK** (pino padrão) para usar o arquivo embutido, ou mande `hw reset` pelo serial.
+
+Chaves principais:
+
+| Chave | Exemplo | |
+|---|---|---|
+| `crsf_rx`, `crsf_tx` | `17`, `17` | iguais = **um fio** (half-duplex invertido); diferentes = dois fios (full-duplex) |
+| `crsf_baud` | `400000` | |
+| `display` | `ssd1306` | `none`, `ssd1306` ou `st7789` |
+| `oled_addr` | `60` | 0x3C |
+| `tft_sclk`, `tft_mosi`, `tft_dc`, `tft_rst`, `tft_rotation` | `22`, `21`, `33`, `5`, `0` | ST7789 |
+| `inputs` | `gpio` | `gpio` ou `pcf8574` (+ `expander_addr`) |
+| `btn_up` … `btn_back`, `aux1` … `aux4` | | botões e switches (modo `gpio`) |
+| `joy_roll`, `joy_pitch`, `joy_throttle`, `joy_yaw`, `battery` | | pinos do ADC1 |
+| `i2c_sda`, `i2c_scl`, `led`, `led_rgb`, `led_active_low`, `buzzer` | | |
+
+Use `-1` para algo que não está ligado (ex.: `"battery": -1`).
 
 ## Configuração remota e OTA
 
@@ -126,12 +161,14 @@ Deixe o WiFi desligado durante o voo: ele usa 2.4 GHz, a mesma faixa dos módulo
 | Pisca rápido (4 Hz) | Perda de link ou bateria crítica |
 | Aceso com uma falha curta por segundo | WiFi ligado |
 
-Se o LED aparecer invertido, troque `LED_ACTIVE_LOW` em [include/Pins.h](include/Pins.h). Com `LED_IS_RGB 1`, um WS2812 mostra cores (verde = link, azul = sem receptor, amarelo = aviso, vermelho = alarme, roxo = WiFi).
+Se o LED aparecer invertido: `hw set led_active_low true`. Com `hw set led_rgb true`, um WS2812 mostra cores (verde = link, azul = sem receptor, amarelo = aviso, vermelho = alarme, roxo = WiFi).
 
 ## Estrutura
 
 ```
-include/Pins.h        pinagem por placa e parâmetros de hardware
+hardware/*.json       pinagem padrão de cada placa (embutida no firmware)
+src/Hardware.cpp      lê, valida e grava o hardware.json
+src/Display*.cpp      um driver por display (SSD1306, ST7789, nenhum)
 src/main.cpp          task de RC (timer) + loop da interface
 src/CRSF.cpp          protocolo: frames RC, ping, parser de telemetria
 src/Config.cpp        configurações e perfis na NVS

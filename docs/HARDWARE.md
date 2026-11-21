@@ -1,6 +1,6 @@
 # Opções de placa e pinagem
 
-O firmware compila para duas placas. A pinagem de cada uma fica em [include/Pins.h](../include/Pins.h) e é escolhida automaticamente pelo ambiente do PlatformIO.
+O firmware compila para dois chips. A pinagem não fica no código: vem de um `hardware.json`, como no ExpressLRS. O padrão de cada placa ([hardware/esp32dev.json](../hardware/esp32dev.json), [hardware/esp32c3.json](../hardware/esp32c3.json)) vai embutido no firmware, e pode ser trocado sem recompilar com `hw set` pelo serial ou em `http://192.168.4.1/hardware`. As tabelas abaixo mostram os valores padrão. Detalhes no [README](../README.md#pinagem-e-hardwarejson).
 
 | | ESP32 DevKit (padrão) | ESP32-C3 (alternativa) | ESP32-S3 (não implementado) |
 |---|---|---|---|
@@ -52,8 +52,8 @@ Cores: vermelho = alimentação, azul = entradas, roxo = interface com o usuári
 | 35 | Joystick direito Y → Pitch (CH2) |
 | 32 | Bateria (meio do divisor) |
 | 21 / 22 | I2C SDA / SCL (OLED) |
-| 16 | CRSF RX ← TX do módulo |
-| 17 | CRSF TX → RX do módulo |
+| 17 | CRSF, um fio (padrão) / TX → RX do módulo com dois fios |
+| 16 | CRSF RX ← TX do módulo (só com dois fios) |
 | 2 | LED azul da placa |
 | 25 | Buzzer |
 | 4 / 13 / 14 / 27 | Botões cima / baixo / OK / voltar |
@@ -81,8 +81,8 @@ O C3 não tem pinos suficientes para 8 botões/switches, então eles entram por 
 | 0 / 1 / 2 / 3 | Roll / Throttle / Yaw / Pitch |
 | 4 | Bateria |
 | 5 / 6 | I2C SDA / SCL (OLED + PCF8574) |
-| 20 / 21 | CRSF RX / TX |
-| 8 | LED (comum, aceso em LOW, como na SuperMini; WS2812 com `LED_IS_RGB 1`) |
+| 21 | CRSF, um fio (padrão); com dois fios: 20 RX / 21 TX |
+| 8 | LED (comum, aceso em LOW, como na SuperMini; WS2812 com `"led_rgb": true`) |
 | 10 | Buzzer |
 
 | PCF8574 | Função |
@@ -100,7 +100,7 @@ Fonte: [wiring/esp32c3.yml](wiring/esp32c3.yml). OLED e PCF8574 dividem os mesmo
 
 ## ESP32-S3 — opção futura
 
-Tem mais pinos, ADC melhor, USB nativo. Ainda não há pinagem nem ambiente para ele; precisaria de um bloco novo em `Pins.h` e um ambiente no `platformio.ini`.
+Tem mais pinos, ADC melhor, USB nativo. Ainda não há pinagem nem ambiente para ele; precisaria de um `hardware/esp32s3.json` e um ambiente no `platformio.ini`.
 
 ## Módulo ExpressLRS TX DIY (ESP32 + E28)
 
@@ -116,14 +116,20 @@ O módulo de rádio é um segundo ESP32 DevKit com um EBYTE E28 (SX1280, 2.4 GHz
 | OLED do módulo SDA / SCL (opcional) | 21 / 22 |
 | Joystick do menu / ventoinha | 35 / 17 |
 
-Ligação com o ELRSTx (DevKit): **GPIO17 → GPIO13 do módulo**, **GPIO16 do módulo → GPIO16**, GND comum. No C3 o ELRSTx usa GPIO21 → 13 e 16 → GPIO20.
+Há duas formas de ligar o ELRSTx ao módulo. **Os dois lados precisam usar a mesma**: o `hardware.json` do ELRSTx (`crsf_rx`/`crsf_tx`) e o do módulo (`serial_rx`/`serial_tx`, em `http://<ip-do-módulo>/hardware.html`).
 
-O alvo padrão usa CRSF num fio só (GPIO13). Para os dois fios, a página de hardware do módulo (`http://<ip-do-módulo>/hardware.html`) precisa ter:
+| | Um fio (como a baia JR de um rádio) | Dois fios |
+|---|---|---|
+| Fios | **GPIO17 → GPIO13 do módulo**, GND | **GPIO17 → GPIO13 do módulo**, **GPIO16 do módulo → GPIO16**, GND |
+| ELRSTx | `crsf_rx = 17`, `crsf_tx = 17` | `crsf_rx = 16`, `crsf_tx = 17` |
+| Módulo | `serial_rx = 13`, `serial_tx = 13` (padrão do alvo) | `serial_rx = 13`, `serial_tx = 16` |
+| Sinal | half-duplex, invertido | full-duplex, sem inversão |
 
-- `serial_rx = 13` e `serial_tx = 16` (pinos diferentes = full-duplex, sem inversão)
-- **sem `led_rgb`**: o layout personalizado vinha com `led_rgb = 15`, o mesmo pino do BUSY do SX1280, o que atrapalha o rádio
+No C3 o ELRSTx usa GPIO21 (um fio) ou 20 RX / 21 TX (dois fios).
 
-Depois de regravar pelo Configurator, confira de novo esses campos.
+Com um fio, o ELRSTx envia o frame de canais e solta a linha para o módulo responder com a telemetria, como o EdgeTX faz. Um resistor de ~1 kΩ em série no fio protege os dois lados se um erro de tempo fizer os dois transmitirem juntos.
+
+Em qualquer caso, o módulo deve ficar **sem `led_rgb`**: o layout personalizado vinha com `led_rgb = 15`, o mesmo pino do BUSY do SX1280, o que atrapalha o rádio. Depois de regravar pelo Configurator, confira de novo esses campos.
 
 O módulo **só transmite quando recebe CRSF de um rádio**. Sem o ELRSTx ligado, ele entra no WiFi depois de `wifi-on-interval` segundos e o receptor nunca conecta. Os parâmetros do módulo (taxa, potência, telemetria, Bind) podem ser alterados pelo próprio ELRSTx: menu **ExpressLRS** ou comando `elrs`.
 
@@ -136,28 +142,30 @@ Os diagramas acima já mostram a alimentação. O regulador 5V é um exemplo: us
 
 ## Comum a todas as placas
 
-**Display:** escolhido na compilação pelo ambiente do PlatformIO (`DISPLAY_TYPE` em [include/Pins.h](../include/Pins.h)).
+**Display:** escolhido no `hardware.json` (`display`), sem recompilar. Os dois drivers vão no firmware.
 
-| Display | Ambiente | Ligação |
-|---------|----------|---------|
-| OLED 0.96" SSD1306 128x64, I2C de 4 pinos (padrão) | `esp32dev` / `esp32-c3-devkitm-1` | SDA/SCL do I2C, VCC 3V3, endereço 0x3C (alguns usam 0x3D) |
-| IPS 1.3"/1.54" ST7789 240x240, SPI (só DevKit) | `esp32dev-st7789` | SCL → GPIO22, SDA → GPIO21, DC → GPIO33, RES → GPIO5, BLK → 3V3, VCC 3V3 |
+| Display | `hardware.json` | Ligação (padrão do DevKit) |
+|---------|-----------------|---------|
+| OLED 0.96" SSD1306 128x64, I2C de 4 pinos (padrão) | `"display": "ssd1306"` | SDA/SCL do I2C, VCC 3V3, endereço `oled_addr` 60 = 0x3C (alguns usam 61 = 0x3D) |
+| IPS 1.3"/1.54" ST7789 240x240, SPI | `"display": "st7789"` | SCL → GPIO22, SDA → GPIO21, DC → GPIO33, RES → GPIO5, BLK → 3V3, VCC 3V3 |
+| nenhum | `"display": "none"` | |
 
-```bash
-pio run -e esp32dev-st7789 -t upload
+```
+hw set display st7789
+reboot
 ```
 
 Cada display tem seu próprio driver com layout e cores próprios (camada em [include/Display.h](../include/Display.h): `DisplaySSD1306.cpp`, `DisplayST7789.cpp`, `DisplayNone.cpp`). O `UI.cpp` só decide o que mostrar. No ST7789 a tela é colorida e ocupa os 240x240: LQ grande em verde/amarelo/vermelho, alarmes em faixa colorida, listas de 9 linhas com barra de rolagem e 12 canais. Prévia das telas: [screens/all-st7789.png](screens/all-st7789.png) e [screens/all-ssd1306.png](screens/all-ssd1306.png), geradas por `python docs/screens/render_screens.py`.
 
 ![Telas no ST7789](screens/all-st7789.png)
 
-O ST7789 usa os pinos do I2C do OLED, então os dois não funcionam ao mesmo tempo. Módulos com pino CS: ligue o CS ao GND. Para girar a imagem, use `-D TFT_ROTATION=1..3`. O ESP32-C3 não tem pinos livres para o SPI. OLEDs de 1.3" com SH1106 não são suportados.
+O ST7789 usa os pinos do I2C do OLED, então os dois não funcionam ao mesmo tempo. Módulos com pino CS: ligue o CS ao GND. Para girar a imagem: `hw set tft_rotation 1` (0 a 3). No ESP32-C3 sobram poucos pinos para o SPI. OLEDs de 1.3" com SH1106 não são suportados.
 
-**Módulo ExpressLRS (UART de 2 pinos):** TX do ESP → RX do módulo, RX do ESP ← TX do módulo, GND comum. Baud **400000** (o módulo não aceita 420000). Para módulos de um pino só (S.Port): `CRSF_INVERTED true` e um resistor de ~1 kΩ em série.
+**Módulo ExpressLRS:** um fio (`crsf_rx` = `crsf_tx`, padrão) até o pino CRSF/S.Port do módulo, como a baia JR, ou dois fios (TX do ESP → RX do módulo, RX do ESP ← TX do módulo). GND comum. Baud **400000** (o módulo não aceita 420000). Veja a tabela na seção do módulo DIY.
 
 **Bateria:** divisor 100k (do + da bateria) / 39k (para GND), com o meio no pino de bateria. Mede até ~11,7 V. Para outro divisor: `set batt.ratio <(R1+R2)/R2 × 1000>`.
 
-**LED:** com `LED_IS_RGB 1`, um WS2812/WS2812B no pino do LED mostra cores. Um único LED funciona sem mudar o código; vários LEDs precisariam de suporte a buffer de pixels.
+**LED:** com `"led_rgb": true`, um WS2812/WS2812B no pino do LED mostra cores. Um único LED funciona sem mudar o código; vários LEDs precisariam de suporte a buffer de pixels.
 
 **Joysticks:** use módulos alimentados com 3.3V. 5V nos pinos analógicos danifica o ESP32.
 
@@ -185,4 +193,4 @@ wireviz -f ps docs/wiring/esp32dev.yml
 wireviz -f ps docs/wiring/esp32c3.yml
 ```
 
-`-f ps` gera só o PNG e o SVG. Mantenha os YAML em sincronia com [include/Pins.h](../include/Pins.h).
+`-f ps` gera só o PNG e o SVG. Mantenha os YAML em sincronia com [hardware/esp32dev.json](../hardware/esp32dev.json) e [hardware/esp32c3.json](../hardware/esp32c3.json). Os diagramas mostram a ligação de dois fios.

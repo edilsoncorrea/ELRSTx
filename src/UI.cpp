@@ -3,6 +3,7 @@
 #include "Commands.h"
 #include "Config.h"
 #include "Display.h"
+#include "Hardware.h"
 #include "Inputs.h"
 #include "Pins.h"
 #include "Safety.h"
@@ -12,6 +13,7 @@
 namespace {
 
 bool displayFound = false;
+Display::Driver* disp = nullptr;
 bool expOk = false;
 
 enum Screen : uint8_t { HOME, MENU, ELRS, CHANNELS, TELEMETRY, CALIBRATE, SETTINGS, PROFILES, REMOTE, INFO };
@@ -62,35 +64,36 @@ bool alarmBeeps = false;
 bool hadLink = false;
 uint32_t ledColor = 0xFFFFFFFF;
 
-#if !INPUTS_VIA_EXPANDER
-const uint8_t INPUT_PINS[8] = {PIN_BTN_UP,  PIN_BTN_DOWN, PIN_BTN_OK,  PIN_BTN_BACK,
-                               PIN_SW_AUX1, PIN_SW_AUX2,  PIN_SW_AUX3, PIN_SW_AUX4};
-#endif
+// Mask bit order (EXP_* in Pins.h): up, down, ok, back, AUX1..AUX4
+int8_t inputPin(uint8_t bit) {
+    const HardwareConfig& hw = Hardware::get();
+    return bit < 4 ? hw.button[bit] : hw.aux[bit - 4];
+}
 
-// Returns the input mask (bit set = pressed / switch on), see EXP_* in Pins.h
+// Returns the input mask (bit set = pressed / switch on)
 uint8_t readInputs() {
-#if INPUTS_VIA_EXPANDER
-    if (!expOk) return 0;
-    if (Wire.requestFrom(I2C_ADDR_EXPANDER, 1) != 1) return 0;
-    return ~Wire.read();
-#else
+    const HardwareConfig& hw = Hardware::get();
+    if (hw.inputs == InputMode::Pcf8574) {
+        if (!expOk) return 0;
+        if (Wire.requestFrom(hw.expanderAddr, (uint8_t)1) != 1) return 0;
+        return ~Wire.read();
+    }
     uint8_t mask = 0;
     for (uint8_t i = 0; i < 8; i++) {
-        if (digitalRead(INPUT_PINS[i]) == LOW) mask |= 1 << i;
+        const int8_t pin = inputPin(i);
+        if (pin >= 0 && digitalRead(pin) == LOW) mask |= 1 << i;
     }
     return mask;
-#endif
 }
 
 void setLed(uint8_t r, uint8_t g, uint8_t b) {
     const uint32_t c = (uint32_t)r << 16 | (uint32_t)g << 8 | b;
     if (c == ledColor) return;
     ledColor = c;
-#if LED_IS_RGB
-    rgbLedWrite(PIN_LED, r, g, b);
-#else
-    digitalWrite(PIN_LED, (c != 0) == (LED_ACTIVE_LOW == 0) ? HIGH : LOW);
-#endif
+    const HardwareConfig& hw = Hardware::get();
+    if (hw.led < 0) return;
+    if (hw.ledRgb) rgbLedWrite(hw.led, r, g, b);
+    else digitalWrite(hw.led, (c != 0) != hw.ledActiveLow ? HIGH : LOW);
 }
 
 void setLed(bool on) { setLed(0, 0, on ? 1 : 0); }
@@ -147,25 +150,25 @@ void updateIndicators() {
     const bool fast = (nowMs / 125) & 1;
     const bool slow = (nowMs / 500) & 1;
     const bool remote = Remote::wifiActive();
-#if LED_IS_RGB
-    if (alarmLevel == ALARM_CRIT) setLed(fast ? 40 : 0, 0, 0);
-    else if (alarmLevel == ALARM_WARN) setLed(slow ? 30 : 0, slow ? 20 : 0, 0);
-    else if (remote) setLed(20, 0, 30);
-    else if (linkUp()) setLed(0, 30, 0);
-    else setLed(0, 0, slow ? 30 : 0);
-#else
-    const uint32_t phase = nowMs % 1000;
-    if (alarmLevel == ALARM_CRIT) setLed(fast);                          // fast blink
-    else if (alarmLevel == ALARM_WARN) setLed(phase < 100 || (phase >= 200 && phase < 300));  // double blip
-    else if (remote) setLed(phase >= 100);                               // on with a short gap
-    else if (linkUp()) setLed(true);                                     // solid
-    else setLed(slow);                                                   // slow blink
-#endif
+    if (Hardware::get().ledRgb) {
+        if (alarmLevel == ALARM_CRIT) setLed(fast ? 40 : 0, 0, 0);
+        else if (alarmLevel == ALARM_WARN) setLed(slow ? 30 : 0, slow ? 20 : 0, 0);
+        else if (remote) setLed(20, 0, 30);
+        else if (linkUp()) setLed(0, 30, 0);
+        else setLed(0, 0, slow ? 30 : 0);
+    } else {
+        const uint32_t phase = nowMs % 1000;
+        if (alarmLevel == ALARM_CRIT) setLed(fast);                          // fast blink
+        else if (alarmLevel == ALARM_WARN) setLed(phase < 100 || (phase >= 200 && phase < 300));  // double blip
+        else if (remote) setLed(phase >= 100);                               // on with a short gap
+        else if (linkUp()) setLed(true);                                     // solid
+        else setLed(slow);                                                   // slow blink
+    }
 
     bool buzz = false;
     if (alarmBeeps && alarmLevel == ALARM_CRIT) buzz = nowMs % 500 < 100;
     else if (alarmBeeps) buzz = nowMs % 3000 < 60;
-    digitalWrite(PIN_BUZZER, buzz ? HIGH : LOW);
+    if (Hardware::get().buzzer >= 0) digitalWrite(Hardware::get().buzzer, buzz ? HIGH : LOW);
 }
 
 // ---------- settings ----------
@@ -414,12 +417,12 @@ void showHome() {
     v.gimbal[1][0] = axis(AXIS_YAW);
     v.gimbal[1][1] = axis(AXIS_PITCH);
     for (uint8_t i = 0; i < AUX_COUNT; i++) v.aux[i] = st.channels[AUX_FIRST_CHANNEL + i] > CRSF_CHANNEL_VALUE_MID;
-    Display::home(v);
+    disp->home(v);
 }
 
 void showList(const char* title, uint8_t count, void (*row)(uint8_t, Display::Row&), bool busy = false) {
     Display::ListView v = {title, count, cursor, editing, busy, row};
-    Display::list(v);
+    disp->list(v);
 }
 
 void menuRow(uint8_t i, Display::Row& r) { copy(r.label, sizeof(r.label), MENU_LABELS[i]); }
@@ -456,7 +459,7 @@ void showMessage(const char* title, std::initializer_list<const char*> lines, co
     }
     v.highlight = highlight;
     v.footer = footer;
-    Display::message(v);
+    disp->message(v);
 }
 
 void showElrs() {
@@ -510,7 +513,7 @@ void showTelemetry() {
     v.satellites = t.satellites;
     v.altitudeM = (int)t.altitude - 1000;
     v.flightMode = t.flightMode;
-    Display::telemetry(v);
+    disp->telemetry(v);
 }
 
 void showCalibrate() {
@@ -547,11 +550,9 @@ void showInfo() {
     snprintf(telem, sizeof(telem), "Telem %lu/%lu bad", (unsigned long)st.telem.goodFrames, (unsigned long)st.telem.badFrames);
     snprintf(heap, sizeof(heap), "Heap %lu", (unsigned long)ESP.getFreeHeap());
     snprintf(up, sizeof(up), "Up %lus", (unsigned long)(nowMs / 1000));
-#if INPUTS_VIA_EXPANDER
-    const char* inputs = expOk ? "Expander ok" : "Expander MISSING";
-#else
-    const char* inputs = "Inputs: GPIO";
-#endif
+    const char* inputs = Hardware::get().inputs == InputMode::Gpio ? "Inputs: GPIO"
+                       : expOk                                       ? "Expander ok"
+                                                                     : "Expander MISSING";
     showMessage("Info", {"FW " FW_VERSION, frames, telem, heap, inputs, up});
 }
 
@@ -560,7 +561,7 @@ void draw() {
     case HOME: showHome(); break;
     case MENU: showList("Menu", MENU_COUNT, menuRow); break;
     case ELRS: showElrs(); break;
-    case CHANNELS: Display::channels(st.channels, CRSF_MAX_CHANNELS); break;
+    case CHANNELS: disp->channels(st.channels, CRSF_MAX_CHANNELS); break;
     case TELEMETRY: showTelemetry(); break;
     case CALIBRATE: showCalibrate(); break;
     case SETTINGS: showList(settingsDirty ? "Settings *" : "Settings", S_COUNT, settingRow); break;
@@ -573,31 +574,33 @@ void draw() {
 }  // namespace
 
 void UI::begin() {
-    pinMode(PIN_BUZZER, OUTPUT);
-    digitalWrite(PIN_BUZZER, LOW);
-#if !LED_IS_RGB
-    pinMode(PIN_LED, OUTPUT);
-#endif
+    const HardwareConfig& hw = Hardware::get();
+    if (hw.buzzer >= 0) {
+        pinMode(hw.buzzer, OUTPUT);
+        digitalWrite(hw.buzzer, LOW);
+    }
+    if (hw.led >= 0 && !hw.ledRgb) pinMode(hw.led, OUTPUT);
     setLed(0, 0, 30);
 
-#if DISPLAY_TYPE == DISPLAY_SSD1306 || INPUTS_VIA_EXPANDER
-    Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);  // the ST7789 reuses these pins on the DevKit
-#endif
-#if INPUTS_VIA_EXPANDER
-    Wire.beginTransmission(I2C_ADDR_EXPANDER);
-    expOk = Wire.endTransmission() == 0;
-    if (expOk) {
-        Wire.beginTransmission(I2C_ADDR_EXPANDER);
-        Wire.write(0xFF);  // all pins as inputs (quasi-bidirectional pull-ups)
-        Wire.endTransmission();
+    if (hw.usesI2c()) Wire.begin(hw.i2cSda, hw.i2cScl, 400000);
+    if (hw.inputs == InputMode::Pcf8574) {
+        Wire.beginTransmission(hw.expanderAddr);
+        expOk = Wire.endTransmission() == 0;
+        if (expOk) {
+            Wire.beginTransmission(hw.expanderAddr);
+            Wire.write(0xFF);  // all pins as inputs (quasi-bidirectional pull-ups)
+            Wire.endTransmission();
+        }
+    } else {
+        for (uint8_t i = 0; i < 8; i++) {
+            if (inputPin(i) >= 0) pinMode(inputPin(i), INPUT_PULLUP);
+        }
+        expOk = true;
     }
-#else
-    for (uint8_t pin : INPUT_PINS) pinMode(pin, INPUT_PULLUP);
-    expOk = true;
-#endif
 
-    displayFound = Display::begin();
-    if (displayFound) Display::splash(FW_VERSION);
+    disp = Display::create(hw.display);
+    displayFound = disp->begin(hw);
+    if (displayFound) disp->splash(FW_VERSION);
     cfg = Config::get();
 }
 

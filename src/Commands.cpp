@@ -2,6 +2,7 @@
 #include "Config.h"
 #include "ElrsParams.h"
 #include "Inputs.h"
+#include "Hardware.h"
 #include "Pins.h"
 #include "Safety.h"
 #include "State.h"
@@ -28,6 +29,10 @@ const char HELP[] =
     "  elrs set <id> <value>   change a parameter (option text or index)\n"
     "  elrs cmd <id> [confirm|cancel]  run a command (Bind, WiFi...)\n"
     "  elrs reload\n"
+    "  hw                      active hardware.json (pins, display, CRSF)\n"
+    "  hw set <key> <value>    change one key (saved, applies after reboot)\n"
+    "  hw saved | default      pending / built-in hardware.json\n"
+    "  hw reset                delete the saved hardware.json\n"
     "  reboot\n"
     "Keys: name, deadband, invert.<axis>, map.<axis> (ch 1-4), safestart,\n"
     "      linkalarm, linktimeout, batt.ratio, batt.cells, batt.warn,\n"
@@ -291,6 +296,32 @@ String elrsCommand(const String& arg) {
     return "ERR usage: elrs [list|reload|set <id> <value>|cmd <id> [confirm|cancel]]";
 }
 
+String hwCommand(const String& arg) {
+    const int sp = arg.indexOf(' ');
+    String sub = sp < 0 ? arg : arg.substring(0, sp);
+    String rest = sp < 0 ? "" : arg.substring(sp + 1);
+    rest.trim();
+    if (!sub.length()) {
+        return String("hardware.json (") + (Hardware::usingOverride() ? "saved" : "built-in") + "):\n" + Hardware::json();
+    }
+    if (sub == "saved") return Hardware::savedJson();
+    if (sub == "default") return Hardware::defaultJson();
+    if (sub == "reset") {
+        Hardware::reset();
+        return "OK saved hardware.json deleted, built-in applies after 'reboot'";
+    }
+    if (sub == "set") {
+        const int s2 = rest.indexOf(' ');
+        if (s2 < 0) return "ERR usage: hw set <key> <value>";
+        String err;
+        String value = rest.substring(s2 + 1);
+        value.trim();
+        if (!Hardware::set(rest.substring(0, s2), value, err)) return "ERR " + err;
+        return "OK saved, applies after 'reboot'";
+    }
+    return "ERR usage: hw [set <key> <value> | saved | default | reset]";
+}
+
 String frameText() {
     const RcState st = State::snapshot();
     String o = "Frame:";
@@ -320,7 +351,8 @@ String Commands::statusText() {
 
     o += "ELRS module: ";
     if (State::moduleAlive(st, now)) o += t.deviceName[0] ? String(t.deviceName) : String("responding");
-    else o += "NOT RESPONDING (check RX/TX wiring, GND, 400000 baud)";
+    else if (Hardware::get().halfDuplex()) o += "NOT RESPONDING (one wire: check the wire to the module's CRSF pin, GND, module serial_rx = serial_tx)";
+    else o += "NOT RESPONDING (two wires: check RX/TX crossed, GND, module serial_rx != serial_tx)";
     o += "\n";
 
     o += "Packet rate: " + String(1000000UL / st.periodUs) + " Hz" +
@@ -353,6 +385,9 @@ String Commands::statusText() {
     for (uint8_t i = 0; i < 8; i++) o += " " + String(st.channels[i]);
     o += "\nFrames sent: " + String(st.frames) + "  telemetry ok/bad: " + t.goodFrames + "/" + t.badFrames + "\n";
     if (st.safeStartHold) o += "SAFE START: move throttle to minimum and switch AUX1 (arm) off\n";
+    const HardwareConfig& hw = Hardware::get();
+    o += "CRSF: " + (hw.halfDuplex() ? "one wire GPIO" + String(hw.crsfRx) : "RX GPIO" + String(hw.crsfRx) + " TX GPIO" + hw.crsfTx) +
+         "  " + hw.crsfBaud + " baud  (hardware.json " + (Hardware::usingOverride() ? "saved" : "built-in") + ")\n";
     o += "WiFi: " + onOff(Remote::wifiActive());
     return o;
 }
@@ -430,6 +465,7 @@ String Commands::execute(const String& input) {
         monitor = b;
         return "OK monitor " + onOff(b);
     }
+    if (cmd == "hw") return hwCommand(arg);
     if (cmd == "reboot") {
         Serial.println("Rebooting...");
         delay(100);

@@ -5,6 +5,7 @@
 #include "Commands.h"
 #include "Config.h"
 #include "ElrsParams.h"
+#include "Hardware.h"
 #include "Inputs.h"
 #include "Pins.h"
 #include "Safety.h"
@@ -71,6 +72,7 @@ void rcCycle(RcState& st, uint32_t& lastPingMs, uint32_t& lastBatteryMs) {
         lastPingMs = now;
         crsf.sendDevicePing();
     }
+    crsf.transmit();
 
     if (now - lastBatteryMs >= BATTERY_INTERVAL_MS) {
         lastBatteryMs = now;
@@ -116,14 +118,14 @@ void setup() {
     const uint32_t t0 = millis();
     while (!Serial && millis() - t0 < 2000) delay(10);
 
+    Hardware::begin();
     Config::begin();
     Inputs::begin();
     UI::begin();
     Remote::begin();
 
-    Serial1.setRxBufferSize(1024);
-    Serial1.begin(CRSF_BAUDRATE, SERIAL_8N1, PIN_CRSF_RX, PIN_CRSF_TX, CRSF_INVERTED);
-    crsf.begin(Serial1);
+    const HardwareConfig& hw = Hardware::get();
+    crsf.begin(Serial1, hw.crsfRx, hw.crsfTx, hw.crsfBaud);
     ElrsParams::begin();
     crsf.setExtendedHandler(ElrsParams::onFrame);
 
@@ -140,12 +142,16 @@ void setup() {
 
     Serial.println();
     Serial.println("=== ELRSTx " FW_VERSION " ===");
-    Serial.printf("CRSF: %d baud, TX GPIO%d -> module RX, RX GPIO%d <- module TX\n", CRSF_BAUDRATE, PIN_CRSF_TX, PIN_CRSF_RX);
-#if INPUTS_VIA_EXPANDER
-    Serial.printf("Display: %s  Expander: %s\n", UI::displayOk() ? "ok" : "not found", UI::expanderOk() ? "ok" : "not found");
-#else
-    Serial.printf("Display: %s  Buttons/switches: GPIO\n", UI::displayOk() ? "ok" : "not found");
-#endif
+    if (Hardware::overrideIgnored()) Serial.println("OK held at boot: saved hardware.json ignored");
+    Serial.printf("hardware.json: %s\n", Hardware::usingOverride() ? "saved" : "built-in");
+    if (hw.halfDuplex()) {
+        Serial.printf("CRSF: %lu baud, one wire on GPIO%d (half-duplex, inverted)\n", (unsigned long)hw.crsfBaud, hw.crsfRx);
+    } else {
+        Serial.printf("CRSF: %lu baud, TX GPIO%d -> module RX, RX GPIO%d <- module TX\n", (unsigned long)hw.crsfBaud,
+                      hw.crsfTx, hw.crsfRx);
+    }
+    Serial.printf("Display: %s (%s)  Inputs: %s\n", Hardware::displayName(hw.display), UI::displayOk() ? "ok" : "not found",
+                  hw.inputs == InputMode::Gpio ? "GPIO" : UI::expanderOk() ? "PCF8574 ok" : "PCF8574 not found");
     Serial.println("Type 'help' for commands.");
 }
 

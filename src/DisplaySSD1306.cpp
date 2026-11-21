@@ -1,12 +1,11 @@
 // OLED 0.96" SSD1306 128x64, I2C, 1 bit. 21 columns x 8 rows of the 6x8 font.
-#include "Pins.h"
-#if DISPLAY_TYPE == DISPLAY_SSD1306
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include "Display.h"
 
 namespace Display {
+namespace ssd1306 {
 namespace {
 
 constexpr uint16_t ON = 1;
@@ -70,10 +69,10 @@ String formatRow(const Row& r, bool edited) {
 
 }  // namespace
 
-bool begin() {
-    Wire.beginTransmission(I2C_ADDR_OLED);
+bool begin(const HardwareConfig& hw) {
+    Wire.beginTransmission(hw.oledAddr);
     if (Wire.endTransmission() != 0) return false;
-    if (!oled.begin(SSD1306_SWITCHCAPVCC, I2C_ADDR_OLED, true, false)) return false;
+    if (!oled.begin(SSD1306_SWITCHCAPVCC, hw.oledAddr, true, false)) return false;
     oled.setTextSize(1);
     return true;
 }
@@ -205,5 +204,22 @@ void message(const MessageView& v) {
     oled.display();
 }
 
+}  // namespace ssd1306
+
+class Ssd1306 : public Driver {
+public:
+    bool begin(const HardwareConfig& hw) override { return ssd1306::begin(hw); }
+    void splash(const char* version) override { ssd1306::splash(version); }
+    void home(const HomeView& v) override { ssd1306::home(v); }
+    void list(const ListView& v) override { ssd1306::list(v); }
+    void channels(const uint16_t* ch, uint8_t count) override { ssd1306::channels(ch, count); }
+    void telemetry(const TelemetryView& v) override { ssd1306::telemetry(v); }
+    void message(const MessageView& v) override { ssd1306::message(v); }
+};
+
+Driver* createSsd1306() {
+    static Ssd1306 d;
+    return &d;
+}
+
 }  // namespace Display
-#endif

@@ -1,19 +1,16 @@
 #include "Inputs.h"
 #include "CRSF.h"
-#include "Pins.h"
-
-namespace {
-const uint8_t AXIS_PINS[AXIS_COUNT] = {PIN_JOY1_X, PIN_JOY2_Y, PIN_JOY1_Y, PIN_JOY2_X};
-}
+#include "Hardware.h"
 
 void Inputs::begin() {
+    const HardwareConfig& hw = Hardware::get();
     analogReadResolution(12);
-    for (uint8_t pin : AXIS_PINS) analogSetPinAttenuation(pin, ADC_11db);
-    analogSetPinAttenuation(PIN_BATTERY, ADC_11db);
+    for (int8_t pin : hw.joy) analogSetPinAttenuation(pin, ADC_11db);
+    if (hw.battery >= 0) analogSetPinAttenuation(hw.battery, ADC_11db);
 }
 
 uint16_t Inputs::readRaw(uint8_t axis) {
-    return analogRead(AXIS_PINS[axis]);
+    return analogRead(Hardware::get().joy[axis]);
 }
 
 uint16_t Inputs::simulate(uint8_t axis, uint32_t nowMs) {
@@ -48,7 +45,9 @@ uint16_t Inputs::toCrsf(uint16_t raw, const AxisCal& cal, uint8_t deadband, bool
 }
 
 uint16_t Battery::readMillivolts(uint16_t ratioX1000) {
-    return (uint32_t)analogReadMilliVolts(PIN_BATTERY) * ratioX1000 / 1000;
+    const int8_t pin = Hardware::get().battery;
+    if (pin < 0) return 0;
+    return (uint32_t)analogReadMilliVolts(pin) * ratioX1000 / 1000;
 }
 
 uint8_t Battery::percent(uint16_t cellMv) {
