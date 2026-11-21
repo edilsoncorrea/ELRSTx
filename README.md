@@ -33,7 +33,7 @@ Pinagem completa das duas, comparação e a opção ESP32-S3: **[docs/HARDWARE.m
 ## Hardware (DevKit)
 
 - ESP32 DevKit (ESP32-WROOM-32)
-- Módulo ExpressLRS TX: **um fio** (padrão, como a baia JR) ou UART de 2 pinos
+- Módulo ExpressLRS TX: UART de 2 pinos (padrão) ou **um fio**, como a baia JR
 - 2 joysticks analógicos 3.3 V
 - 4 botões de menu + 4 switches (entre o pino e o GND)
 - OLED 0.96" SSD1306 128x64 I2C de 4 pinos (0x3C) — opcional
@@ -46,7 +46,7 @@ Pinagem completa das duas, comparação e a opção ESP32-S3: **[docs/HARDWARE.m
 | 34 / 35 | Joystick direito X (Yaw) / Y (Pitch) |
 | 32 | Bateria |
 | 21 / 22 | I2C SDA / SCL (OLED) |
-| 17 | CRSF, um fio até o pino CRSF do módulo (com dois fios: 16 RX ← TX do módulo, 17 TX → RX do módulo) |
+| 16 / 17 | CRSF RX ← TX do módulo / CRSF TX → RX do módulo (com um fio: só o 17, `hw set crsf_rx 17`) |
 | 2 | LED da placa |
 | 25 | Buzzer |
 | 4 / 13 / 14 / 27 | Botões cima / baixo / OK / voltar |
@@ -132,7 +132,7 @@ Chaves principais:
 
 | Chave | Exemplo | |
 |---|---|---|
-| `crsf_rx`, `crsf_tx` | `17`, `17` | iguais = **um fio** (half-duplex invertido); diferentes = dois fios (full-duplex) |
+| `crsf_rx`, `crsf_tx` | `16`, `17` | iguais = **um fio** (half-duplex invertido); diferentes = dois fios (full-duplex) |
 | `crsf_baud` | `400000` | |
 | `display` | `ssd1306` | `none`, `ssd1306` ou `st7789` |
 | `oled_addr` | `60` | 0x3C |

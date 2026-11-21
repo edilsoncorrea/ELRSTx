@@ -52,8 +52,8 @@ Cores: vermelho = alimentação, azul = entradas, roxo = interface com o usuári
 | 35 | Joystick direito Y → Pitch (CH2) |
 | 32 | Bateria (meio do divisor) |
 | 21 / 22 | I2C SDA / SCL (OLED) |
-| 17 | CRSF, um fio (padrão) / TX → RX do módulo com dois fios |
-| 16 | CRSF RX ← TX do módulo (só com dois fios) |
+| 16 | CRSF RX ← TX do módulo |
+| 17 | CRSF TX → RX do módulo (com um fio, o único fio do CRSF) |
 | 2 | LED azul da placa |
 | 25 | Buzzer |
 | 4 / 13 / 14 / 27 | Botões cima / baixo / OK / voltar |
@@ -81,7 +81,7 @@ O C3 não tem pinos suficientes para 8 botões/switches, então eles entram por 
 | 0 / 1 / 2 / 3 | Roll / Throttle / Yaw / Pitch |
 | 4 | Bateria |
 | 5 / 6 | I2C SDA / SCL (OLED + PCF8574) |
-| 21 | CRSF, um fio (padrão); com dois fios: 20 RX / 21 TX |
+| 20 / 21 | CRSF RX / TX (com um fio, só o 21) |
 | 8 | LED (comum, aceso em LOW, como na SuperMini; WS2812 com `"led_rgb": true`) |
 | 10 | Buzzer |
 
@@ -118,7 +118,7 @@ O módulo de rádio é um segundo ESP32 DevKit com um EBYTE E28 (SX1280, 2.4 GHz
 
 Há duas formas de ligar o ELRSTx ao módulo. **Os dois lados precisam usar a mesma**: o `hardware.json` do ELRSTx (`crsf_rx`/`crsf_tx`) e o do módulo (`serial_rx`/`serial_tx`, em `http://<ip-do-módulo>/hardware.html`).
 
-| | Um fio (como a baia JR de um rádio) | Dois fios |
+| | Um fio (como a baia JR de um rádio) | Dois fios (padrão) |
 |---|---|---|
 | Fios | **GPIO17 → GPIO13 do módulo**, GND | **GPIO17 → GPIO13 do módulo**, **GPIO16 do módulo → GPIO16**, GND |
 | ELRSTx | `crsf_rx = 17`, `crsf_tx = 17` | `crsf_rx = 16`, `crsf_tx = 17` |
@@ -161,7 +161,7 @@ Cada display tem seu próprio driver com layout e cores próprios (camada em [in
 
 O ST7789 usa os pinos do I2C do OLED, então os dois não funcionam ao mesmo tempo. Módulos com pino CS: ligue o CS ao GND. Para girar a imagem: `hw set tft_rotation 1` (0 a 3). No ESP32-C3 sobram poucos pinos para o SPI. OLEDs de 1.3" com SH1106 não são suportados.
 
-**Módulo ExpressLRS:** um fio (`crsf_rx` = `crsf_tx`, padrão) até o pino CRSF/S.Port do módulo, como a baia JR, ou dois fios (TX do ESP → RX do módulo, RX do ESP ← TX do módulo). GND comum. Baud **400000** (o módulo não aceita 420000). Veja a tabela na seção do módulo DIY.
+**Módulo ExpressLRS:** dois fios (padrão: TX do ESP → RX do módulo, RX do ESP ← TX do módulo) ou um fio (`crsf_rx` = `crsf_tx`) até o pino CRSF/S.Port do módulo, como a baia JR. GND comum. Baud **400000** (o módulo não aceita 420000). Veja a tabela na seção do módulo DIY.
 
 **Bateria:** divisor 100k (do + da bateria) / 39k (para GND), com o meio no pino de bateria. Mede até ~11,7 V. Para outro divisor: `set batt.ratio <(R1+R2)/R2 × 1000>`.
 

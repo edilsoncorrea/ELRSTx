@@ -5,7 +5,7 @@
   "joy_yaw": 2,
   "battery": 4,
 
-  "crsf_rx": 21,
+  "crsf_rx": 20,
   "crsf_tx": 21,
   "crsf_baud": 400000,
 
