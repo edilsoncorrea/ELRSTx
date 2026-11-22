@@ -534,13 +534,30 @@ void showCalibrate() {
 }
 
 void showRemote() {
-    const String state = String("WiFi AP: ") + (Remote::wifiActive() ? "ON" : "off");
-    if (Remote::wifiActive()) {
+    switch (Remote::mode()) {
+    case Remote::Mode::Off:
+        showMessage("WiFi / OTA", {"WiFi: off", nullptr, "OK = turn WiFi on",
+                                   Remote::homeNetwork().length() ? "(home network first)" : nullptr},
+                    nullptr, 0);
+        break;
+    case Remote::Mode::Connecting: {
+        const String home = Remote::homeNetwork();
+        showMessage("WiFi / OTA", {"WiFi: connecting", nullptr, home.c_str(), "falls back to own AP"}, nullptr, 0);
+        break;
+    }
+    case Remote::Mode::Home: {
         const String ssid = Remote::ssid();
+        const String ip = Remote::ip();
+        showMessage("WiFi / OTA", {"WiFi: home network", nullptr, ssid.c_str(), ip.c_str(), "elrstx.local"}, "OK = off", 0);
+        break;
+    }
+    case Remote::Mode::Ap: {
+        const String ssid = Remote::apName();
         const String pass = String("pw ") + cfg.hw.wifiPass;
-        showMessage("WiFi / OTA", {state.c_str(), nullptr, ssid.c_str(), pass.c_str(), "http://192.168.4.1"}, nullptr, 0);
-    } else {
-        showMessage("WiFi / OTA", {state.c_str(), nullptr, "OK = turn WiFi on"}, nullptr, 0);
+        const String url = Remote::url();
+        showMessage("WiFi / OTA", {"WiFi: own AP", nullptr, ssid.c_str(), pass.c_str(), url.c_str()}, "OK = off", 0);
+        break;
+    }
     }
 }
 

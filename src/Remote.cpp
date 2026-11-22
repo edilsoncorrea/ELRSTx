@@ -2,6 +2,8 @@
 #include <WebServer.h>
 #include <Update.h>
 #include <ArduinoOTA.h>
+#include <ESPmDNS.h>
+#include <Preferences.h>
 #include "Commands.h"
 #include "Config.h"
 #include "Hardware.h"
@@ -9,9 +11,34 @@
 namespace {
 
 WebServer server(80);
-bool wifiOn = false;
+constexpr const char* HOSTNAME = "elrstx";          // http://elrstx.local
+constexpr uint32_t HOME_TIMEOUT_MS = 20000;          // then fall back to the own AP
+
+Remote::Mode wifiMode = Remote::Mode::Off;
+uint32_t connectStartMs = 0;
 bool routesReady = false;
 String apSsid;
+String homeSsid;
+String homePass;
+String failureText;  // why the last home connection failed
+uint8_t lastReason = 0;
+bool eventsReady = false;
+
+void loadHome() {
+    Preferences p;
+    if (!p.begin("wifi", true)) return;
+    homeSsid = p.getString("ssid", "");
+    homePass = p.getString("pass", "");
+    p.end();
+}
+
+bool storeHome() {
+    Preferences p;
+    if (!p.begin("wifi", false)) return false;
+    const bool ok = p.putString("ssid", homeSsid) == homeSsid.length() && p.putString("pass", homePass) == homePass.length();
+    p.end();
+    return ok;
+}
 
 const char PAGE[] = R"HTML(<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -110,40 +137,126 @@ void setupRoutes() {
     routesReady = true;
 }
 
+// Web server, OTA and mDNS once a network (home or own AP) is up
+void startServices() {
+    if (!routesReady) setupRoutes();
+    server.begin();
+    const Settings s = Config::get();
+    ArduinoOTA.setHostname(HOSTNAME);
+    ArduinoOTA.setPassword(s.hw.wifiPass);
+    ArduinoOTA.begin();  // also starts mDNS with HOSTNAME
+    MDNS.addService("http", "tcp", 80);
+}
+
+void startAp() {
+    const Settings s = Config::get();
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(apSsid.c_str(), s.hw.wifiPass);
+    wifiMode = Remote::Mode::Ap;
+    startServices();
+}
+
 }  // namespace
 
 void Remote::begin() {
     char buf[16];
     snprintf(buf, sizeof(buf), "ELRSTx-%04X", (uint16_t)(ESP.getEfuseMac() >> 32));
     apSsid = buf;
+    loadHome();
 }
 
 void Remote::loop() {
-    if (wifiOn) {
+    if (wifiMode == Mode::Connecting) {
+        if (WiFi.status() == WL_CONNECTED) {
+            wifiMode = Mode::Home;
+            startServices();
+        } else if (millis() - connectStartMs > HOME_TIMEOUT_MS) {
+            switch (lastReason) {
+            case WIFI_REASON_NO_AP_FOUND: failureText = "network not found (out of range, or 5 GHz only)"; break;
+            case WIFI_REASON_AUTH_FAIL:
+            case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+            case WIFI_REASON_HANDSHAKE_TIMEOUT: failureText = "wrong password"; break;
+            case 0: failureText = "no answer from the router"; break;
+            default: failureText = String("reason ") + lastReason + " (" + WiFi.disconnectReasonName((wifi_err_reason_t)lastReason) + ")";
+            }
+            startAp();  // home network not reachable (e.g. at the field)
+        }
+        return;
+    }
+    if (wifiMode != Mode::Off) {
         server.handleClient();
         ArduinoOTA.handle();
     }
 }
 
 void Remote::setWifi(bool on) {
-    if (on == wifiOn) return;
+    if (on == (wifiMode != Mode::Off)) return;
     if (on) {
-        const Settings s = Config::get();
-        WiFi.mode(WIFI_AP);
-        WiFi.softAP(apSsid.c_str(), s.hw.wifiPass);
-        if (!routesReady) setupRoutes();
-        server.begin();
-        ArduinoOTA.setHostname("elrstx");
-        ArduinoOTA.setPassword(s.hw.wifiPass);
-        ArduinoOTA.begin();
+        if (homeSsid.length()) {
+            // Try the home network first; loop() falls back to the own AP
+            if (!eventsReady) {
+                WiFi.onEvent([](arduino_event_id_t, arduino_event_info_t info) {
+                    lastReason = info.wifi_sta_disconnected.reason;
+                }, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+                eventsReady = true;
+            }
+            lastReason = 0;
+            WiFi.mode(WIFI_STA);
+            WiFi.setHostname(HOSTNAME);
+            WiFi.begin(homeSsid.c_str(), homePass.c_str());
+            connectStartMs = millis();
+            wifiMode = Mode::Connecting;
+        } else {
+            startAp();
+        }
     } else {
         ArduinoOTA.end();
+        MDNS.end();
         server.stop();
         WiFi.softAPdisconnect(true);
+        WiFi.disconnect(true);
         WiFi.mode(WIFI_OFF);
+        wifiMode = Mode::Off;
     }
-    wifiOn = on;
 }
 
-bool Remote::wifiActive() { return wifiOn; }
-String Remote::ssid() { return apSsid; }
+bool Remote::wifiActive() { return wifiMode != Mode::Off; }
+Remote::Mode Remote::mode() { return wifiMode; }
+String Remote::ssid() { return wifiMode == Mode::Ap || homeSsid.isEmpty() ? apSsid : homeSsid; }
+String Remote::apName() { return apSsid; }
+String Remote::homeNetwork() { return homeSsid; }
+
+String Remote::ip() {
+    if (wifiMode == Mode::Home) return WiFi.localIP().toString();
+    if (wifiMode == Mode::Ap) return WiFi.softAPIP().toString();
+    return "";
+}
+
+String Remote::url() {
+    if (wifiMode == Mode::Home) return String("http://") + HOSTNAME + ".local";
+    if (wifiMode == Mode::Ap) return "http://" + WiFi.softAPIP().toString();
+    return "";
+}
+
+String Remote::lastFailure() { return failureText; }
+
+String Remote::scan() {
+    const bool wasOff = wifiMode == Mode::Off;
+    if (wasOff) WiFi.mode(WIFI_STA);
+    else if (WiFi.getMode() == WIFI_AP) WiFi.mode(WIFI_AP_STA);
+    const int n = WiFi.scanNetworks();
+    String o = String(n < 0 ? 0 : n) + " networks (2.4 GHz only):";
+    for (int i = 0; i < n; i++) {
+        o += "\n  " + WiFi.SSID(i) + "  ch " + WiFi.channel(i) + "  " + WiFi.RSSI(i) + " dBm";
+    }
+    WiFi.scanDelete();
+    if (wasOff) WiFi.mode(WIFI_OFF);
+    return o;
+}
+
+bool Remote::setHome(const String& ssid, const String& pass) {
+    homeSsid = ssid;
+    homePass = pass;
+    return storeHome();
+}

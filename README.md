@@ -104,7 +104,9 @@ defaults                volta aos padrões (não grava)
 cal [center|start|stop|cancel]
 sim [on|off]            simulação dos sticks (t alterna)
 frame                   último frame CRSF (f)
-wifi on|off             AP + página web + OTA
+wifi on|off             WiFi: rede de casa (se salva) ou rede própria; web + OTA
+wifi home <rede> <senha>  salva a rede de casa (http://elrstx.local)
+wifi forget | status | scan
 mon on|off              linha de status a cada segundo
 elrs                    parâmetros do módulo ExpressLRS
 elrs set <id> <valor>   altera um parâmetro (texto da opção ou índice)
@@ -146,8 +148,10 @@ Use `-1` para algo que não está ligado (ex.: `"battery": -1`).
 
 ## Configuração remota e OTA
 
-- **WiFi:** `wifi on` (ou menu WiFi / OTA). Conecte na rede `ELRSTx-XXXX` (senha padrão `elrstx1234`) e abra `http://192.168.4.1`. A página mostra o status, aceita comandos e faz upload do `firmware.bin`.
-- **OTA pelo PlatformIO:** com o AP ligado e o PC conectado nele, rode `pio run -e ota -t upload`.
+- **Rede de casa:** salve uma vez com `wifi home <rede> <senha>`. Depois, `wifi on` (ou menu WiFi / OTA) conecta nela e a página abre em **http://elrstx.local** (ou pelo IP mostrado em `wifi` e na tela). Só redes de 2.4 GHz; `wifi scan` lista as que o rádio enxerga.
+- **Rede própria:** sem rede de casa salva, ou se ela não responder em 20 s (ex.: no campo), o rádio cria a rede `ELRSTx-XXXX` (senha padrão `elrstx1234`) em `http://192.168.4.1`. Se a de casa falhar, `wifi` mostra o motivo (senha errada, rede não encontrada...).
+- **Página web:** status, comandos, `hardware.json` (`/hardware`) e upload do `firmware.bin`.
+- **OTA pelo PlatformIO:** `pio run -e ota -t upload` (vai para `elrstx.local`). Na rede própria: `pio run -e ota -t upload --upload-port 192.168.4.1`.
 
 Deixe o WiFi desligado durante o voo: ele usa 2.4 GHz, a mesma faixa dos módulos ELRS de 2.4 GHz.
 

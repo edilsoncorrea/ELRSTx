@@ -5,8 +5,15 @@
 void Inputs::begin() {
     const HardwareConfig& hw = Hardware::get();
     analogReadResolution(12);
-    for (int8_t pin : hw.joy) analogSetPinAttenuation(pin, ADC_11db);
-    if (hw.battery >= 0) analogSetPinAttenuation(hw.battery, ADC_11db);
+    // The core only accepts the attenuation once the pin has been set up by a first read
+    for (int8_t pin : hw.joy) {
+        analogRead(pin);
+        analogSetPinAttenuation(pin, ADC_11db);
+    }
+    if (hw.battery >= 0) {
+        analogRead(hw.battery);
+        analogSetPinAttenuation(hw.battery, ADC_11db);
+    }
 }
 
 uint16_t Inputs::readRaw(uint8_t axis) {

@@ -23,7 +23,9 @@ const char HELP[] =
     "  cal center|start|stop|cancel\n"
     "  sim [on|off]            stick simulation (t = toggle)\n"
     "  frame                   dump last CRSF frame (f)\n"
-    "  wifi on|off             WiFi AP: web config + OTA\n"
+    "  wifi on|off             WiFi: home network if saved, else own AP; web + OTA\n"
+    "  wifi home <ssid> <pw>   save the home network (http://elrstx.local)\n"
+    "  wifi forget | status | scan\n"
     "  mon on|off              status line every second\n"
     "  elrs                    ExpressLRS module parameters (like the ELRS Lua)\n"
     "  elrs set <id> <value>   change a parameter (option text or index)\n"
@@ -296,6 +298,55 @@ String elrsCommand(const String& arg) {
     return "ERR usage: elrs [list|reload|set <id> <value>|cmd <id> [confirm|cancel]]";
 }
 
+String wifiState() {
+    switch (Remote::mode()) {
+    case Remote::Mode::Off: return "WiFi off";
+    case Remote::Mode::Connecting: return "WiFi connecting to '" + Remote::homeNetwork() + "'...";
+    case Remote::Mode::Home:
+        return "WiFi on '" + Remote::ssid() + "', IP " + Remote::ip() + " -> " + Remote::url() + " (or http://" +
+               Remote::ip() + ")";
+    case Remote::Mode::Ap:
+        return "WiFi AP '" + Remote::apName() + "' pass '" + Config::get().hw.wifiPass + "' -> " + Remote::url();
+    }
+    return "";
+}
+
+String wifiCommand(const String& arg) {
+    const int sp = arg.indexOf(' ');
+    String sub = sp < 0 ? arg : arg.substring(0, sp);
+    String rest = sp < 0 ? "" : arg.substring(sp + 1);
+    rest.trim();
+    bool b;
+    if (!sub.length() || sub == "status") {
+        const String home = Remote::homeNetwork();
+        String o = wifiState() + "\nHome network: " + (home.length() ? "'" + home + "'" : String("none (wifi home <ssid> <password>)"));
+        if (Remote::lastFailure().length()) o += "\nLast home connection failed: " + Remote::lastFailure();
+        return o;
+    }
+    if (sub == "scan") return Remote::scan();
+    if (parseBool(sub, b)) {
+        Remote::setWifi(b);
+        return "OK " + wifiState();
+    }
+    if (sub == "home") {
+        // Password is the last word, so SSIDs with spaces work: wifi home My Network secret123
+        const int last = rest.lastIndexOf(' ');
+        if (last < 0) return "ERR usage: wifi home <ssid> <password>";
+        String ssid = rest.substring(0, last);
+        ssid.trim();
+        const String pass = rest.substring(last + 1);
+        if (!ssid.length() || ssid.length() > 32 || pass.length() < 8 || pass.length() > 63)
+            return "ERR ssid 1-32 chars, password 8-63 chars";
+        if (!Remote::setHome(ssid, pass)) return "ERR flash write failed";
+        return "OK home network '" + ssid + "' saved; used next time WiFi is turned on";
+    }
+    if (sub == "forget") {
+        if (!Remote::setHome("", "")) return "ERR flash write failed";
+        return "OK home network forgotten; WiFi will open its own AP";
+    }
+    return "ERR usage: wifi [on|off|status] | wifi home <ssid> <password> | wifi forget";
+}
+
 String hwCommand(const String& arg) {
     const int sp = arg.indexOf(' ');
     String sub = sp < 0 ? arg : arg.substring(0, sp);
@@ -388,7 +439,7 @@ String Commands::statusText() {
     const HardwareConfig& hw = Hardware::get();
     o += "CRSF: " + (hw.halfDuplex() ? "one wire GPIO" + String(hw.crsfRx) : "RX GPIO" + String(hw.crsfRx) + " TX GPIO" + hw.crsfTx) +
          "  " + hw.crsfBaud + " baud  (hardware.json " + (Hardware::usingOverride() ? "saved" : "built-in") + ")\n";
-    o += "WiFi: " + onOff(Remote::wifiActive());
+    o += wifiState();
     return o;
 }
 
@@ -452,13 +503,7 @@ String Commands::execute(const String& input) {
     }
     if (cmd == "frame") return frameText();
     if (cmd == "elrs") return elrsCommand(arg);
-    if (cmd == "wifi") {
-        bool b;
-        if (!parseBool(arg, b)) return "ERR usage: wifi on|off";
-        Remote::setWifi(b);
-        if (!b) return "OK WiFi off";
-        return "OK WiFi AP '" + Remote::ssid() + "' pass '" + Config::get().hw.wifiPass + "' -> http://192.168.4.1";
-    }
+    if (cmd == "wifi") return wifiCommand(arg);
     if (cmd == "mon") {
         bool b;
         if (!parseBool(arg, b)) return "ERR usage: mon on|off";
