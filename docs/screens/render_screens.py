@@ -144,6 +144,7 @@ class Mono:
         self.g.d.ellipse([px - 2, py - 2, px + 2, py + 2], fill=self.ON)
 
     def list(self, v):
+        v = dict(v, rows=v["rows"] + [dict(label="< Back")])  # every list ends with Back, as in UI.cpp
         self.header(v["title"])
         if v.get("busy"):
             self.t(122, 0, "*")
@@ -291,6 +292,7 @@ class Color:
         self.g.d.ellipse([px - R, py - R, px + R, py + R], fill=self.ACCENT)
 
     def list(self, v):
+        v = dict(v, rows=v["rows"] + [dict(label="< Back")])  # every list ends with Back, as in UI.cpp
         rows, cur, n = v["rows"], v["cursor"], self.LIST_ROWS
         scroll = max(0, min(cur - (n - 1), len(rows) - n)) if cur >= n else 0
         self.header(v["title"], "..." if v.get("busy") else None, self.DIM)

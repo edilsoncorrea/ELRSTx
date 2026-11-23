@@ -27,6 +27,11 @@ connectors:
     subtype: escada de resistores (como no ELRS)
     notes: "No lugar dos 4 botões. hardware.json: buttons adc, btn_adc 33. Ligar no 3V3, nunca no 5V"
     pinlabels: [GND, VCC, OUT]
+  ENCODER:
+    type: "Alternativa: encoder rotativo"
+    subtype: EC11 com botão
+    notes: "No lugar dos 4 botões. hardware.json: buttons encoder (enc_a 13, enc_b 27, enc_sw 14)"
+    pinlabels: [A, B, SW, C e SW-]
   SWITCHES:
     type: Switches AUX
     notes: Um lado de cada switch no pino, o outro no comum
@@ -59,6 +64,7 @@ cables:
   W_JD:    {category: bundle, wirecount: 4, colors: [BK, RD, BU, VT]}
   W_BTN:   {category: bundle, wirecount: 5, colors: [OG, OG, OG, OG, BK]}
   W_5W:    {category: bundle, wirecount: 3, colors: [BK, RD, OG]}
+  W_ENC:   {category: bundle, wirecount: 4, colors: [YE, GN, OG, BK]}
   W_SW:    {category: bundle, wirecount: 5, colors: [WH, WH, WH, WH, BK]}
   W_OLED:  {category: bundle, wirecount: 4, colors: [BK, RD, YE, GN]}
   W_ELRS:  {category: bundle, wirecount: 4, colors: [BK, RD, YE, GN]}
@@ -89,6 +95,9 @@ connections:
   - - BOTAO_5V: [GND, VCC, OUT]
     - W_5W: [1-3]
     - ESP32: [GND, 3V3, GPIO33]
+  - - ENCODER: [A, B, SW, C e SW-]
+    - W_ENC: [1-4]
+    - ESP32: [GPIO13, GPIO27, GPIO14, GND]
   - - SWITCHES: [AUX1 arm, AUX2, AUX3, AUX4, Comum]
     - W_SW: [1-5]
     - ESP32: [GPIO18, GPIO19, GPIO23, GPIO26, GND]

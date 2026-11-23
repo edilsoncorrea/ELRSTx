@@ -10,7 +10,7 @@
 
 enum class DisplayType : uint8_t { None, Ssd1306, St7789 };
 enum class InputMode : uint8_t { Gpio, Pcf8574 };
-enum class ButtonMode : uint8_t { Inputs, Adc };  // menu buttons: as "inputs", or one ADC pin
+enum class ButtonMode : uint8_t { Inputs, Adc, Encoder };  // menu buttons: as "inputs", one ADC pin, or a rotary encoder
 
 // One analog pin with a resistor ladder (5-way button). Same order as ExpressLRS's
 // "joystick_values", so its numbers can be copied: up, down, left, right, enter, idle.
@@ -33,6 +33,8 @@ struct HardwareConfig {
     ButtonMode buttons;        // adc: up/down/ok/back come from btnAdc instead
     int8_t btnAdc;             // ADC1 pin of the ladder
     uint16_t btnAdcValues[ADC_BTN_COUNT];  // reading per direction, ExpressLRS order (see AdcButton)
+    int8_t encA, encB, encSw;  // encoder: turn = up/down, press = OK, hold = back
+    bool encReverse;           // swap the turning direction
 
     int8_t i2cSda;
     int8_t i2cScl;

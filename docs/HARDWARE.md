@@ -56,7 +56,7 @@ Cores: vermelho = alimentação, azul = entradas, roxo = interface com o usuári
 | 17 | CRSF TX → RX do módulo (com um fio, o único fio do CRSF) |
 | 2 | LED azul da placa |
 | 25 | Buzzer |
-| 4 / 13 / 14 / 27 | Botões cima / baixo / OK / voltar (ou um botão de 5 direções no GPIO33, `"buttons": "adc"`; veja o README) |
+| 4 / 13 / 14 / 27 | Botões cima / baixo / OK / voltar (ou um botão de 5 direções no GPIO33, `"buttons": "adc"`, ou um encoder com A/B/SW em 13/27/14, `"buttons": "encoder"`; veja o README) |
 | 18 / 19 / 23 / 26 | Switches AUX1 (arm) / AUX2 / AUX3 / AUX4 |
 | 33 | botão de 5 direções (ADC) |
 | 15 | DC do ST7789 |

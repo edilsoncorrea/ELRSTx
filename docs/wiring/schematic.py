@@ -227,6 +227,9 @@ def draw(key, board):
         if board.get("ladder"):
             module(d, 11.5, -8.6, "Alternativa: botão 5 direções\n(escada de resistores, como no ELRS)\n\"buttons\": \"adc\" - no lugar dos 4 botões",
                    [("VCC", "rail", "3V3"), ("GND", "gnd", None), ("OUT", "net", "BTN_ADC")], "button")
+            module(d, 11.5, -14.6, "Alternativa: encoder rotativo (EC11)\n\"buttons\": \"encoder\" - usa os pinos dos botões",
+                   [("A", "net", "BTN_DOWN"), ("B", "net", "BTN_BACK"), ("SW", "net", "BTN_OK"), ("C / SW", "gnd", None)],
+                   "button")
         d.save(str(OUT / f"schematic-{key}.svg"), transparent=False)
         d.save(str(OUT / f"schematic-{key}.png"), dpi=110, transparent=False)
 

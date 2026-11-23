@@ -23,6 +23,10 @@
   "buttons": "inputs",
   "btn_adc": -1,
   "btn_adc_values": [185, 308, 436, 147, 2051, 4095],
+  "enc_a": -1,
+  "enc_b": -1,
+  "enc_sw": -1,
+  "enc_reverse": false,
 
   "i2c_sda": 5,
   "i2c_scl": 6,

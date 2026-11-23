@@ -21,7 +21,7 @@ bool ignored = false;
 
 const char* const DISPLAY_NAMES[] = {"none", "ssd1306", "st7789"};
 const char* const INPUT_NAMES[] = {"gpio", "pcf8574"};
-const char* const BUTTON_MODES[] = {"inputs", "adc"};
+const char* const BUTTON_MODES[] = {"inputs", "adc", "encoder"};
 const char* const ADC_BUTTON_NAMES[] = {"up", "down", "left", "right", "enter", "idle"};
 
 // ---------- pin rules ----------
@@ -107,12 +107,26 @@ bool validate(const HardwareConfig& c, String& err) {
         if (!checkAdc("btn_adc", c.btnAdc, err)) return false;
         use("btn_adc", c.btnAdc);
     }
+    const bool encoder = c.buttons == ButtonMode::Encoder;
+    if (encoder) {
+        if (c.encA < 0 || c.encB < 0 || c.encSw < 0) {
+            err = "enc_a, enc_b and enc_sw are required with buttons = encoder";
+            return false;
+        }
+        // Pull-ups needed: input-only pins (no pull-up) are rejected by the output check
+        if (!checkPin("enc_a", c.encA, true, err) || !checkPin("enc_b", c.encB, true, err) ||
+            !checkPin("enc_sw", c.encSw, true, err))
+            return false;
+        use("enc_a", c.encA);
+        use("enc_b", c.encB);
+        use("enc_sw", c.encSw);
+    }
     if (c.inputs == InputMode::Gpio) {
         // Pull-ups needed: input-only pins (no pull-up) are rejected by the output check
         for (uint8_t i = 0; i < 4; i++) {
-            if (!adcButtons) {
+            if (!adcButtons && !encoder) {
                 if (c.button[i] < 0) {
-                    err = String(BTN[i]) + " is required with inputs = gpio (or use buttons = adc)";
+                    err = String(BTN[i]) + " is required with inputs = gpio (or use buttons = adc / encoder)";
                     return false;
                 }
                 if (!checkPin(BTN[i], c.button[i], true, err)) return false;
@@ -224,7 +238,7 @@ bool parse(const JsonDocument& d, HardwareConfig& c, String& err) {
 
     const int bm = indexOf(BUTTON_MODES, d["buttons"] | "inputs");
     if (bm < 0) {
-        err = "buttons: inputs or adc";
+        err = "buttons: inputs, adc or encoder";
         return false;
     }
     c.buttons = (ButtonMode)bm;
@@ -235,6 +249,10 @@ bool parse(const JsonDocument& d, HardwareConfig& c, String& err) {
         return false;
     }
     for (uint8_t i = 0; i < ADC_BTN_COUNT; i++) c.btnAdcValues[i] = constrain((int)(values[i] | 0), 0, 4095);
+    c.encA = d["enc_a"] | -1;
+    c.encB = d["enc_b"] | -1;
+    c.encSw = d["enc_sw"] | -1;
+    c.encReverse = d["enc_reverse"] | false;
     c.i2cSda = d["i2c_sda"] | -1;
     c.i2cScl = d["i2c_scl"] | -1;
 

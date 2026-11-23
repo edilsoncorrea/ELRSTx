@@ -100,6 +100,61 @@ uint8_t ladderButtons() {
     }
 }
 
+// Rotary encoder (EC11 style). Quadrature decoded in an interrupt; one detent of a
+// common encoder is 4 transitions. Each detent becomes one short up/down press.
+std::atomic<int16_t> encSteps{0};
+volatile uint8_t encState = 0;
+volatile int8_t encSub = 0;
+
+void IRAM_ATTR encoderIsr() {
+    // Valid transitions of the Gray code: +1 one way, -1 the other, 0 = bounce
+    static const int8_t STEP[16] = {0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0};
+    const HardwareConfig& hw = Hardware::get();
+    encState = ((encState << 2) | (digitalRead(hw.encA) << 1) | digitalRead(hw.encB)) & 0x0F;
+    encSub += STEP[encState];
+    if (encSub >= 4 || encSub <= -4) {
+        encSteps.fetch_add(encSub > 0 ? 1 : -1, std::memory_order_relaxed);
+        encSub = 0;
+    }
+}
+
+constexpr uint32_t ENC_HOLD_MS = 600;  // press longer than this = back
+
+// Turning gives one-frame pulses (press, then release on the next read, so the menu
+// sees an edge per detent). The switch: short press = OK on release, hold = back.
+uint8_t encoderButtons() {
+    const HardwareConfig& hw = Hardware::get();
+    static bool pulse = false;
+    static uint32_t swSince = 0;
+    static bool swHeld = false, swUsed = false;
+    uint8_t mask = 0;
+
+    if (pulse) {
+        pulse = false;  // release frame
+    } else {
+        const int16_t n = encSteps.load(std::memory_order_relaxed);
+        if (n) {
+            encSteps.fetch_sub(n > 0 ? 1 : -1, std::memory_order_relaxed);
+            const bool up = (n < 0) != hw.encReverse;
+            mask |= bit(up ? EXP_BTN_UP : EXP_BTN_DOWN);
+            pulse = true;
+        }
+    }
+
+    const bool sw = digitalRead(hw.encSw) == LOW;
+    if (sw && !swHeld) {
+        swSince = nowMs;
+        swUsed = false;
+    }
+    if (sw && !swUsed && nowMs - swSince >= ENC_HOLD_MS) {
+        mask |= bit(EXP_BTN_BACK);
+        swUsed = true;
+    }
+    if (!sw && swHeld && !swUsed && nowMs - swSince >= 30) mask |= bit(EXP_BTN_OK);
+    swHeld = sw;
+    return mask;
+}
+
 // Returns the input mask (bit set = pressed / switch on)
 uint8_t readInputs() {
     const HardwareConfig& hw = Hardware::get();
@@ -113,6 +168,7 @@ uint8_t readInputs() {
         }
     }
     if (hw.buttons == ButtonMode::Adc) mask = (mask & 0xF0) | ladderButtons();
+    if (hw.buttons == ButtonMode::Encoder) mask = (mask & 0xF0) | encoderButtons();
     return mask;
 }
 
@@ -268,6 +324,11 @@ void moveCursor(bool up, bool down, uint8_t count) {
     if (down) cursor = (cursor + 1) % count;
 }
 
+// Lists end with a "< Back" row at index `count`; the cursor wraps, so it is one
+// step up from the first row too. Choosing it works like the back button.
+void moveListCursor(bool up, bool down, uint8_t count) { moveCursor(up, down, count + 1); }
+bool onBackRow(uint8_t count) { return cursor == count; }
+
 void elrsButtons(bool up, bool down, bool ok, bool back) {
     using namespace ElrsParams;
     if (elrsCmdId) {
@@ -302,7 +363,11 @@ void elrsButtons(bool up, bool down, bool ok, bool back) {
         }
         return;
     }
-    if (elrsCount) moveCursor(up, down, elrsCount);
+    moveListCursor(up, down, elrsCount);
+    if (ok && onBackRow(elrsCount)) {
+        ok = false;
+        back = true;
+    }
     if (ok && cursor < elrsCount) {
         Param p;
         if (!param(elrsIds[cursor], p)) return;
@@ -341,9 +406,9 @@ void handleButtons(uint8_t pressed) {
         if (ok) enter(MENU);
         break;
     case MENU:
-        moveCursor(up, down, MENU_COUNT);
-        if (ok) enter(MENU_TARGETS[cursor]);
-        else if (back) enter(HOME);
+        moveListCursor(up, down, MENU_COUNT);
+        if ((ok && onBackRow(MENU_COUNT)) || back) enter(HOME);
+        else if (ok) enter(MENU_TARGETS[cursor]);
         break;
     case ELRS:
         elrsButtons(up, down, ok, back);
@@ -359,11 +424,11 @@ void handleButtons(uint8_t pressed) {
             if (down) adjustSetting(cursor, -1);
             if (ok || back) editing = false;
         } else {
-            moveCursor(up, down, S_COUNT);
-            if (ok) {
+            moveListCursor(up, down, S_COUNT);
+            if (ok && !onBackRow(S_COUNT)) {
                 if (settingIsToggle(cursor)) adjustSetting(cursor, 1);
                 else editing = true;
-            } else if (back) {
+            } else if (ok || back) {
                 if (settingsDirty) Config::save();
                 settingsDirty = false;
                 enter(MENU);
@@ -371,12 +436,12 @@ void handleButtons(uint8_t pressed) {
         }
         break;
     case PROFILES:
-        moveCursor(up, down, PROFILE_COUNT);
-        if (ok) {
+        moveListCursor(up, down, PROFILE_COUNT);
+        if (ok && !onBackRow(PROFILE_COUNT)) {
             Config::selectProfile(cursor);
             cfg = Config::get();
             enter(HOME);
-        } else if (back) {
+        } else if (ok || back) {
             enter(MENU);
         }
         break;
@@ -450,8 +515,19 @@ void showHome() {
     disp->home(v);
 }
 
+void (*listRow)(uint8_t, Display::Row&) = nullptr;
+uint8_t listCount = 0;
+
+void rowOrBack(uint8_t i, Display::Row& r) {
+    if (i == listCount) strlcpy(r.label, "< Back", sizeof(r.label));
+    else listRow(i, r);
+}
+
+// Every list gets a "< Back" row after its own rows (see moveListCursor)
 void showList(const char* title, uint8_t count, void (*row)(uint8_t, Display::Row&), bool busy = false) {
-    Display::ListView v = {title, count, cursor, editing, busy, row};
+    listRow = row;
+    listCount = count;
+    Display::ListView v = {title, (uint8_t)(count + 1), cursor, editing, busy, rowOrBack};
     disp->list(v);
 }
 
@@ -639,10 +715,18 @@ void UI::begin() {
             Wire.endTransmission();
         }
     } else {
-        for (uint8_t i = hw.buttons == ButtonMode::Adc ? 4 : 0; i < 8; i++) {
+        for (uint8_t i = hw.buttons == ButtonMode::Inputs ? 0 : 4; i < 8; i++) {
             if (inputPin(i) >= 0) pinMode(inputPin(i), INPUT_PULLUP);
         }
         expOk = true;
+    }
+    if (hw.buttons == ButtonMode::Encoder) {
+        pinMode(hw.encA, INPUT_PULLUP);
+        pinMode(hw.encB, INPUT_PULLUP);
+        pinMode(hw.encSw, INPUT_PULLUP);
+        encState = (digitalRead(hw.encA) << 1) | digitalRead(hw.encB);
+        attachInterrupt(hw.encA, encoderIsr, CHANGE);
+        attachInterrupt(hw.encB, encoderIsr, CHANGE);
     }
 
     disp = Display::create(hw.display);
@@ -664,7 +748,7 @@ void UI::loop() {
     if (screen == ELRS) {
         ElrsParams::touch();
         elrsCount = ElrsParams::children(elrsFolder, elrsIds, sizeof(elrsIds));
-        if (cursor >= elrsCount) cursor = elrsCount ? elrsCount - 1 : 0;
+        if (cursor > elrsCount) cursor = elrsCount;  // the "< Back" row
     }
     handleButtons(edges(inputs & 0x0F));
     Calibration::update(st.raw);

@@ -142,8 +142,9 @@ Chaves principais:
 | `tft_sclk`, `tft_mosi`, `tft_dc`, `tft_rst`, `tft_rotation` | `22`, `21`, `15`, `5`, `0` | ST7789 |
 | `inputs` | `gpio` | `gpio` ou `pcf8574` (+ `expander_addr`) |
 | `btn_up` … `btn_back`, `aux1` … `aux4` | | botões e switches (modo `gpio`) |
-| `buttons` | `inputs` | `inputs` (botões como em `inputs`) ou `adc` (botão de 5 direções num pino só) |
+| `buttons` | `inputs` | `inputs` (botões como em `inputs`), `adc` (botão de 5 direções num pino só) ou `encoder` (encoder rotativo) |
 | `btn_adc`, `btn_adc_values` | `33`, `[185, 308, 436, 147, 2051, 4095]` | pino do ADC1 e leituras de cima, baixo, esquerda, direita, enter, solto (ordem do `joystick_values` do ELRS) |
+| `enc_a`, `enc_b`, `enc_sw`, `enc_reverse` | `13`, `27`, `14`, `false` | encoder: pinos A, B e do botão; `true` inverte o sentido do giro |
 | `joy_roll`, `joy_pitch`, `joy_throttle`, `joy_yaw`, `battery` | | pinos do ADC1 |
 | `i2c_sda`, `i2c_scl`, `led`, `led_rgb`, `led_active_low`, `buzzer` | | |
 
@@ -166,6 +167,27 @@ O padrão (`[185, 308, 436, 147, 2051, 4095]`) são os valores do `hardware.json
 3. Para copiar de um módulo ELRS: `hw set btn_adc_values 185,308,436,147,2051,4095` (os números do `joystick_values` dele).
 
 Uma direção por vez (o menu não precisa de mais). As chaves AUX continuam em pinos digitais. O pino tem de ser do ADC1: no DevKit só sobra o **GPIO33**, reservado para ele (o DC do ST7789 fica no GPIO15). No ESP32-C3 todos os pinos do ADC1 já estão ocupados (os botões vão no PCF8574).
+
+## Encoder rotativo no lugar dos botões
+
+Um encoder com botão (tipo EC11) substitui os 4 botões do menu:
+
+| Ação | Menu |
+|------|------|
+| Girar | cima / baixo |
+| Apertar | OK |
+| Segurar 0,6 s | voltar |
+
+Ligação no DevKit, sem resistores (pull-up interno): **A → GPIO13, B → GPIO27, SW → GPIO14**, o pino comum (C) e o outro lado do SW no **GND**. Depois:
+
+```
+hw set buttons encoder
+reboot
+```
+
+Toda lista (Menu, ExpressLRS e as pastas dele, Settings, Profiles) termina com um item **< Back**, que volta ao nível anterior como o botão voltar. A lista é circular: de cima, um passo para trás chega nele. Em Settings, sair salva as alterações.
+
+Se girar para um lado mover o cursor ao contrário: `hw set enc_reverse true`. O botão do encoder fica no pino do OK padrão, então segurar o encoder ao ligar também ignora o `hardware.json` salvo. As chaves AUX continuam nos pinos delas. No ESP32-C3 não sobram pinos livres para o encoder.
 
 ## Configuração remota e OTA
 
