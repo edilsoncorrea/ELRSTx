@@ -6,6 +6,7 @@ RcState shared = {};
 }
 
 std::atomic<uint8_t> State::auxSwitches{0};
+std::atomic<uint16_t> State::buttonAdc{4095};
 
 void State::publish(const RcState& s) {
     portENTER_CRITICAL(&mux);

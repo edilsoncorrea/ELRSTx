@@ -10,6 +10,12 @@
 
 enum class DisplayType : uint8_t { None, Ssd1306, St7789 };
 enum class InputMode : uint8_t { Gpio, Pcf8574 };
+enum class ButtonMode : uint8_t { Inputs, Adc };  // menu buttons: as "inputs", or one ADC pin
+
+// One analog pin with a resistor ladder (5-way button). Same order as ExpressLRS's
+// "joystick_values", so its numbers can be copied: up, down, left, right, enter, idle.
+// Left = back, right and enter = OK.
+enum AdcButton : uint8_t { ADC_BTN_UP, ADC_BTN_DOWN, ADC_BTN_LEFT, ADC_BTN_RIGHT, ADC_BTN_ENTER, ADC_BTN_IDLE, ADC_BTN_COUNT };
 
 struct HardwareConfig {
     int8_t joy[4];             // by Axis: roll, pitch, throttle, yaw (ADC1 pins)
@@ -23,6 +29,10 @@ struct HardwareConfig {
     int8_t button[4];          // up, down, ok, back (GPIO mode)
     int8_t aux[4];             // AUX1..AUX4 (GPIO mode)
     uint8_t expanderAddr;      // PCF8574 mode
+
+    ButtonMode buttons;        // adc: up/down/ok/back come from btnAdc instead
+    int8_t btnAdc;             // ADC1 pin of the ladder
+    uint16_t btnAdcValues[ADC_BTN_COUNT];  // reading per direction, ExpressLRS order (see AdcButton)
 
     int8_t i2cSda;
     int8_t i2cScl;
@@ -54,6 +64,9 @@ String savedJson();       // pending: what applies after the next reboot
 // Validate and store (applies after reboot). err explains a rejection.
 bool save(const String& json, String& err);
 bool set(const String& key, const String& value, String& err);
+// Store the ladder reading of one direction (hw learn); applies at once and is saved
+bool setButtonValue(AdcButton b, uint16_t value, String& err);
+const char* adcButtonName(AdcButton b);
 void reset();             // delete the override
 const char* displayName(DisplayType t);
 }

@@ -20,6 +20,10 @@
   "aux4": -1,
   "expander_addr": 32,
 
+  "buttons": "inputs",
+  "btn_adc": -1,
+  "btn_adc_values": [185, 308, 436, 147, 2051, 4095],
+
   "i2c_sda": 5,
   "i2c_scl": 6,
 

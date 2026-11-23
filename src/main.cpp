@@ -57,6 +57,10 @@ void rcCycle(RcState& st, uint32_t& lastPingMs, uint32_t& lastBatteryMs) {
         st.raw[a] = s.model.simulation ? Inputs::simulate(a, now) : Inputs::readRaw(a);
         ch[s.model.channel[a]] = Inputs::toCrsf(st.raw[a], s.hw.cal[a], s.model.deadband, s.model.invert[a]);
     }
+    // Menu buttons on a resistor ladder are read here with the sticks: one task owns the ADC
+    const HardwareConfig& hw = Hardware::get();
+    if (hw.buttons == ButtonMode::Adc) State::buttonAdc.store(analogRead(hw.btnAdc), std::memory_order_relaxed);
+
     const uint8_t sw = State::auxSwitches.load(std::memory_order_relaxed);
     for (uint8_t i = 0; i < AUX_COUNT; i++) {
         ch[AUX_FIRST_CHANNEL + i] = (sw >> i) & 1 ? CRSF_CHANNEL_VALUE_MAX : CRSF_CHANNEL_VALUE_MIN;

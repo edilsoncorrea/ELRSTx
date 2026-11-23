@@ -1,5 +1,6 @@
 #include "UI.h"
 #include <Wire.h>
+#include <climits>
 #include "Commands.h"
 #include "Config.h"
 #include "Display.h"
@@ -70,19 +71,48 @@ int8_t inputPin(uint8_t bit) {
     return bit < 4 ? hw.button[bit] : hw.aux[bit - 4];
 }
 
+// 5-way button on a resistor ladder: the nearest learned reading wins. A direction
+// counts once two reads in a row (>= 20 ms) agree, so pressing/releasing does not
+// flicker through the directions in between.
+uint8_t ladderButtons() {
+    const HardwareConfig& hw = Hardware::get();
+    const int v = State::buttonAdc.load(std::memory_order_relaxed);
+    uint8_t nearest = ADC_BTN_IDLE;
+    int best = INT_MAX;
+    for (uint8_t i = 0; i < ADC_BTN_COUNT; i++) {
+        const int d = abs(v - (int)hw.btnAdcValues[i]);
+        if (d < best) {
+            best = d;
+            nearest = i;
+        }
+    }
+    static uint8_t last = ADC_BTN_IDLE;
+    static uint8_t stable = ADC_BTN_IDLE;
+    if (nearest == last) stable = nearest;
+    last = nearest;
+    switch (stable) {
+    case ADC_BTN_UP: return bit(EXP_BTN_UP);
+    case ADC_BTN_DOWN: return bit(EXP_BTN_DOWN);
+    case ADC_BTN_LEFT: return bit(EXP_BTN_BACK);
+    case ADC_BTN_ENTER:
+    case ADC_BTN_RIGHT: return bit(EXP_BTN_OK);  // right = enter, like the ELRS Lua
+    default: return 0;
+    }
+}
+
 // Returns the input mask (bit set = pressed / switch on)
 uint8_t readInputs() {
     const HardwareConfig& hw = Hardware::get();
-    if (hw.inputs == InputMode::Pcf8574) {
-        if (!expOk) return 0;
-        if (Wire.requestFrom(hw.expanderAddr, (uint8_t)1) != 1) return 0;
-        return ~Wire.read();
-    }
     uint8_t mask = 0;
-    for (uint8_t i = 0; i < 8; i++) {
-        const int8_t pin = inputPin(i);
-        if (pin >= 0 && digitalRead(pin) == LOW) mask |= 1 << i;
+    if (hw.inputs == InputMode::Pcf8574) {
+        if (expOk && Wire.requestFrom(hw.expanderAddr, (uint8_t)1) == 1) mask = ~Wire.read();
+    } else {
+        for (uint8_t i = 0; i < 8; i++) {
+            const int8_t pin = inputPin(i);
+            if (pin >= 0 && digitalRead(pin) == LOW) mask |= 1 << i;
+        }
     }
+    if (hw.buttons == ButtonMode::Adc) mask = (mask & 0xF0) | ladderButtons();
     return mask;
 }
 
@@ -609,7 +639,7 @@ void UI::begin() {
             Wire.endTransmission();
         }
     } else {
-        for (uint8_t i = 0; i < 8; i++) {
+        for (uint8_t i = hw.buttons == ButtonMode::Adc ? 4 : 0; i < 8; i++) {
             if (inputPin(i) >= 0) pinMode(inputPin(i), INPUT_PULLUP);
         }
         expOk = true;

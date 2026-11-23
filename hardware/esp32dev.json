@@ -20,6 +20,10 @@
   "aux4": 26,
   "expander_addr": 32,
 
+  "buttons": "inputs",
+  "btn_adc": 33,
+  "btn_adc_values": [185, 308, 436, 147, 2051, 4095],
+
   "i2c_sda": 21,
   "i2c_scl": 22,
 
@@ -27,7 +31,7 @@
   "oled_addr": 60,
   "tft_sclk": 22,
   "tft_mosi": 21,
-  "tft_dc": 33,
+  "tft_dc": 15,
   "tft_rst": 5,
   "tft_rotation": 0,
 

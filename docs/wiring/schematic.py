@@ -13,12 +13,13 @@ BOARDS = {
         "left": [("GPIO36", "ROLL"), ("GPIO39", "THROTTLE"), ("GPIO34", "YAW"), ("GPIO35", "PITCH"),
                  ("GPIO32", "VBAT_SENSE"), ("GPIO4", "BTN_UP"), ("GPIO13", "BTN_DOWN"), ("GPIO14", "BTN_OK"),
                  ("GPIO27", "BTN_BACK"), ("GPIO18", "AUX1_ARM"), ("GPIO19", "AUX2"), ("GPIO23", "AUX3"),
-                 ("GPIO26", "AUX4")],
+                 ("GPIO26", "AUX4"), ("GPIO33", "BTN_ADC")],
         "right": [("GPIO21", "SDA"), ("GPIO22", "SCL"), ("GPIO17", "CRSF_TX"), ("GPIO16", "CRSF_RX"),
                   ("GPIO25", "BUZZER"), ("GPIO2", "LED")],
         "vin": "VIN",
         "expander": False,
         "led_active_low": False,
+        "ladder": "GPIO33",
     },
     "esp32c3": {
         "title": "ELRSTx - ESP32-C3 + PCF8574",
@@ -47,7 +48,7 @@ GROUPS = {
 }
 NET_GROUP = {
     "ROLL": "analog", "THROTTLE": "analog", "YAW": "analog", "PITCH": "analog", "VBAT_SENSE": "analog",
-    "BTN_UP": "button", "BTN_DOWN": "button", "BTN_OK": "button", "BTN_BACK": "button",
+    "BTN_UP": "button", "BTN_DOWN": "button", "BTN_OK": "button", "BTN_BACK": "button", "BTN_ADC": "button",
     "AUX1_ARM": "switch", "AUX2": "switch", "AUX3": "switch", "AUX4": "switch",
     "SDA": "i2c", "SCL": "i2c", "CRSF_TX": "crsf", "CRSF_RX": "crsf", "BUZZER": "ind", "LED": "ind",
     "5V": "5V", "3V3": "3V3",
@@ -223,11 +224,41 @@ def draw(key, board):
         led(d, 19, -2.6, board["led_active_low"])
         if board["expander"]:
             expander(d, 12, -8)
+        if board.get("ladder"):
+            module(d, 11.5, -8.6, "Alternativa: botão 5 direções\n(escada de resistores, como no ELRS)\n\"buttons\": \"adc\" - no lugar dos 4 botões",
+                   [("VCC", "rail", "3V3"), ("GND", "gnd", None), ("OUT", "net", "BTN_ADC")], "button")
         d.save(str(OUT / f"schematic-{key}.svg"), transparent=False)
         d.save(str(OUT / f"schematic-{key}.png"), dpi=110, transparent=False)
+
+
+def st7789():
+    """Só a ligação do display ST7789 no DevKit."""
+    nets = {"TFT_SCL": "i2c", "TFT_SDA": "i2c", "TFT_DC": "i2c", "TFT_RES": "i2c"}
+    NET_GROUP.update(nets, GND="GND")
+    with schemdraw.Drawing(show=False) as d:
+        d.config(fontsize=10, unit=2.5, lw=LW, bgcolor="white")
+        d.add(elm.Label().at((-3.5, 4.2)).label("ELRSTx - display ST7789 240x240 (SPI) no ESP32 DevKit", fontsize=14, halign="left"))
+        pins = [elm.IcPin(name=g, side="right", anchorname=g) for g in ("GPIO22", "GPIO21", "GPIO15", "GPIO5")]
+        pins += [elm.IcPin(name="3V3", side="top", anchorname="V33"), elm.IcPin(name="GND", side="bottom", anchorname="GND")]
+        ic = ic_block(d, (0, 0), "center", "ESP32 DevKit", pins, 3.2, CHIP_STYLE, loc="top", ofst=1.0)
+        for g, net in zip(("GPIO22", "GPIO21", "GPIO15", "GPIO5"), nets):
+            tag(d, getattr(ic, g), "right", net)
+        rail(d, ic.V33, "3V3")
+        ground(d, ic.GND)
+        module(d, 9.5, 1.95, "IPS ST7789 240x240\n(\"display\": \"st7789\")",
+               [("GND", "net", "GND"), ("VCC", "net", "3V3"), ("SCL", "net", "TFT_SCL"), ("SDA", "net", "TFT_SDA"),
+                ("RES", "net", "TFT_RES"), ("DC", "net", "TFT_DC"), ("BLK", "net", "3V3")], "i2c")
+        d.add(elm.Label().at((-3.5, -4.6)).label(
+            "Tudo em 3V3. Usa os pinos do I2C do OLED (os dois não funcionam juntos). Módulo com CS: CS no GND.\n"
+            "O GPIO33 fica para o botão de 5 direções.",
+            fontsize=10, halign="left", color="#444"))
+        d.save(str(OUT / "st7789-esp32dev.svg"), transparent=False)
+        d.save(str(OUT / "st7789-esp32dev.png"), dpi=110, transparent=False)
 
 
 if __name__ == "__main__":
     for key, board in BOARDS.items():
         draw(key, board)
         print("ok", key)
+    st7789()
+    print("ok st7789")

@@ -10,6 +10,10 @@ void Inputs::begin() {
         analogRead(pin);
         analogSetPinAttenuation(pin, ADC_11db);
     }
+    if (hw.buttons == ButtonMode::Adc) {
+        analogRead(hw.btnAdc);
+        analogSetPinAttenuation(hw.btnAdc, ADC_11db);
+    }
     if (hw.battery >= 0) {
         analogRead(hw.battery);
         analogSetPinAttenuation(hw.battery, ADC_11db);

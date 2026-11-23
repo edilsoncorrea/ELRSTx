@@ -116,6 +116,7 @@ hw                      hardware.json ativo (pinos, display, CRSF)
 hw set <chave> <valor>  altera uma chave (gravado, vale após reboot)
 hw saved | default      hardware.json pendente / embutido
 hw reset                apaga o hardware.json gravado
+hw learn [direção]      botão de 5 direções: grava a leitura de up/down/left/right/enter/idle
 reboot
 ```
 
@@ -138,13 +139,33 @@ Chaves principais:
 | `crsf_baud` | `400000` | |
 | `display` | `ssd1306` | `none`, `ssd1306` ou `st7789` |
 | `oled_addr` | `60` | 0x3C |
-| `tft_sclk`, `tft_mosi`, `tft_dc`, `tft_rst`, `tft_rotation` | `22`, `21`, `33`, `5`, `0` | ST7789 |
+| `tft_sclk`, `tft_mosi`, `tft_dc`, `tft_rst`, `tft_rotation` | `22`, `21`, `15`, `5`, `0` | ST7789 |
 | `inputs` | `gpio` | `gpio` ou `pcf8574` (+ `expander_addr`) |
 | `btn_up` … `btn_back`, `aux1` … `aux4` | | botões e switches (modo `gpio`) |
+| `buttons` | `inputs` | `inputs` (botões como em `inputs`) ou `adc` (botão de 5 direções num pino só) |
+| `btn_adc`, `btn_adc_values` | `33`, `[185, 308, 436, 147, 2051, 4095]` | pino do ADC1 e leituras de cima, baixo, esquerda, direita, enter, solto (ordem do `joystick_values` do ELRS) |
 | `joy_roll`, `joy_pitch`, `joy_throttle`, `joy_yaw`, `battery` | | pinos do ADC1 |
 | `i2c_sda`, `i2c_scl`, `led`, `led_rgb`, `led_active_low`, `buzzer` | | |
 
 Use `-1` para algo que não está ligado (ex.: `"battery": -1`).
+
+## Botões do menu num fio só (botão de 5 direções)
+
+Como no ExpressLRS, os botões do menu podem ficar num único pino analógico: o botão de 5 direções vem ligado a uma escada de resistores e cada direção gera uma tensão diferente. É o mesmo esquema do `joystick` / `joystick_values` do `hardware.json` do ExpressLRS, **na mesma ordem**: cima, baixo, esquerda, direita, enter, solto.
+
+O padrão (`[185, 308, 436, 147, 2051, 4095]`) são os valores do `hardware.json` do módulo ELRS DIY (alvo "DIY 2400 TX ESP32 SX1280 E28"). Servem se o seu botão de 5 direções for montado igual ao desse módulo; caso contrário, ensine as leituras com `hw learn`.
+
+| Direção | No menu |
+|---|---|
+| Cima / baixo | move o cursor, muda valores |
+| Esquerda | voltar |
+| Direita / enter (apertar) | OK |
+
+1. Ligue o botão de 5 direções no **GPIO33** (ADC1), com a escada de resistores, e mande `hw set buttons adc` e `reboot`. Os GPIO 4, 13, 14 e 27 ficam livres.
+2. Se as direções saírem trocadas: segure cada uma e mande `hw learn up`, `hw learn down`, `hw learn left`, `hw learn right`, `hw learn enter`. Solto: `hw learn idle`. Vale na hora, sem reboot. `hw learn` sozinho mostra a leitura atual e a tabela.
+3. Para copiar de um módulo ELRS: `hw set btn_adc_values 185,308,436,147,2051,4095` (os números do `joystick_values` dele).
+
+Uma direção por vez (o menu não precisa de mais). As chaves AUX continuam em pinos digitais. O pino tem de ser do ADC1: no DevKit só sobra o **GPIO33**, reservado para ele (o DC do ST7789 fica no GPIO15). No ESP32-C3 todos os pinos do ADC1 já estão ocupados (os botões vão no PCF8574).
 
 ## Configuração remota e OTA
 

@@ -17,6 +17,7 @@ digraph ELRSTx {
         joyL [label="Joystick esquerdo\nRoll / Throttle", fillcolor="#dbeaf7"];
         joyR [label="Joystick direito\nYaw / Pitch", fillcolor="#dbeaf7"];
         btn  [label="4 botões de menu\ncima / baixo / OK / voltar", fillcolor="#dbeaf7"];
+        way5 [label="ou botão 5 direções\n(escada de resistores)", fillcolor="#dbeaf7", style="rounded,filled,dashed"];
         sw   [label="4 switches\nAUX1 (arm) .. AUX4", fillcolor="#dbeaf7"];
     }
 
@@ -48,6 +49,7 @@ digraph ELRSTx {
     joyL -> esp [label="ADC  GPIO36 / 39", color="#2e86c1", fontcolor="#2e86c1"];
     joyR -> esp [label="ADC  GPIO34 / 35", color="#2e86c1", fontcolor="#2e86c1"];
     btn  -> esp [label="GPIO 4 / 13 / 14 / 27", color="#2e86c1", fontcolor="#2e86c1"];
+    way5 -> esp [label="ADC  GPIO33 (\"buttons\": \"adc\")", color="#2e86c1", fontcolor="#2e86c1", style=dashed];
     sw   -> esp [label="GPIO 18 / 19 / 23 / 26", color="#2e86c1", fontcolor="#2e86c1"];
 
     // link

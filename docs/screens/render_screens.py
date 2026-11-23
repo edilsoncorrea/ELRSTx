@@ -388,7 +388,7 @@ TELEM = dict(rssi1=42, rssi2=45, lq=100, snr=9, down_rssi=38, down_lq=96, volt=1
              pry=(2, -1, 178), sats=11, alt=34, mode="ANGL")
 
 SCREENS = [
-    ("00-splash", "Inicializacao", lambda d: d.splash("2.1.0")),
+    ("00-splash", "Inicializacao", lambda d: d.splash("2.2.0")),
     ("01-home", "Inicial", lambda d: d.home(HOME)),
     ("02-home-alarm", "Inicial com alarme",
      lambda d: d.home(dict(HOME, link=False, alarm=("crit", "LINK LOST"), gimbal=[(0.5, 0.0), (0.5, 0.5)], tx_batt=6.9, tx_level="warn"))),
@@ -413,9 +413,11 @@ SCREENS = [
     ("12-profiles", "Perfis", lambda d: d.list(dict(title="Profiles", cursor=1, rows=[dict(label=l) for l in [
         "0 Model 1 *", "1 Quad 5in", "2 Wing", "3 Profile 3"]]))),
     ("13-wifi", "WiFi / OTA", lambda d: d.message(dict(title="WiFi / OTA", highlight=0, lines=[
-        "WiFi AP: ON", None, "ELRSTx-A1B2", "pw elrstx1234", "http://192.168.4.1"]))),
+        "WiFi: home network", None, "MinhaRede", "192.168.0.42", "elrstx.local"], footer="OK = off"))),
+    ("13b-wifi-ap", "WiFi / OTA (AP)", lambda d: d.message(dict(title="WiFi / OTA", highlight=0, lines=[
+        "WiFi: own AP", None, "ELRSTx-A1B2", "pw elrstx1234", "http://192.168.4.1"], footer="OK = off"))),
     ("14-info", "Info", lambda d: d.message(dict(title="Info", lines=[
-        "FW 2.1.0", "Frames 75120", "Telem 18342/3 bad", "Heap 214560", "Inputs: GPIO", "Up 301s"]))),
+        "FW 2.2.0", "Frames 75120", "Telem 18342/3 bad", "Heap 214560", "Inputs: GPIO", "Up 301s"]))),
 ]
 
 

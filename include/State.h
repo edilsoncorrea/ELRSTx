@@ -27,4 +27,8 @@ bool fresh(uint32_t lastMs, uint32_t nowMs, uint32_t maxAgeMs);
 
 // Bitmask of AUX switches from the I2C expander, written by the UI loop
 extern std::atomic<uint8_t> auxSwitches;
+
+// Raw ADC of the resistor-ladder menu buttons ("buttons": "adc"), written by the RC task,
+// which does all analog reads (the ADC driver must not be used from two tasks at once)
+extern std::atomic<uint16_t> buttonAdc;
 }

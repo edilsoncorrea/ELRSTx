@@ -56,15 +56,17 @@ Cores: vermelho = alimentação, azul = entradas, roxo = interface com o usuári
 | 17 | CRSF TX → RX do módulo (com um fio, o único fio do CRSF) |
 | 2 | LED azul da placa |
 | 25 | Buzzer |
-| 4 / 13 / 14 / 27 | Botões cima / baixo / OK / voltar |
+| 4 / 13 / 14 / 27 | Botões cima / baixo / OK / voltar (ou um botão de 5 direções no GPIO33, `"buttons": "adc"`; veja o README) |
 | 18 / 19 / 23 / 26 | Switches AUX1 (arm) / AUX2 / AUX3 / AUX4 |
-| 33 | livre |
+| 33 | botão de 5 direções (ADC) |
+| 15 | DC do ST7789 |
 
 Regras seguidas nessa pinagem:
 - **Analógicos só no ADC1 (GPIO 32–39).** O ADC2 para de funcionar com o WiFi ligado.
 - **GPIO 34–39 são só entrada e não têm pull-up**: servem para analógicos, não para botões.
 - **Pinos de boot (0, 2, 5, 12, 15) fora dos botões.** O GPIO12 puxado para cima, por exemplo, impede o boot.
 - Botões e switches vão **entre o pino e o GND**, usando o pull-up interno.
+- **Botão de 5 direções (escada de resistores) no 3V3, nunca no 5V.** Os GPIOs do ESP32 não toleram 5 V (máximo ~3,6 V) e o ADC só lê até ~3,1 V. A peça feita para o ExpressLRS funciona, mas com os valores ~2/3 menores: calibre com `hw learn`.
 
 ### Diagrama de ligações (DevKit)
 
@@ -147,8 +149,10 @@ Os diagramas acima já mostram a alimentação. O regulador 5V é um exemplo: us
 | Display | `hardware.json` | Ligação (padrão do DevKit) |
 |---------|-----------------|---------|
 | OLED 0.96" SSD1306 128x64, I2C de 4 pinos (padrão) | `"display": "ssd1306"` | SDA/SCL do I2C, VCC 3V3, endereço `oled_addr` 60 = 0x3C (alguns usam 61 = 0x3D) |
-| IPS 1.3"/1.54" ST7789 240x240, SPI | `"display": "st7789"` | SCL → GPIO22, SDA → GPIO21, DC → GPIO33, RES → GPIO5, BLK → 3V3, VCC 3V3 |
+| IPS 1.3"/1.54" ST7789 240x240, SPI | `"display": "st7789"` | SCL → GPIO22, SDA → GPIO21, DC → GPIO15, RES → GPIO5, BLK → 3V3, VCC 3V3 |
 | nenhum | `"display": "none"` | |
+
+![Ligação do ST7789 no DevKit](wiring/st7789-esp32dev.svg)
 
 ```
 hw set display st7789

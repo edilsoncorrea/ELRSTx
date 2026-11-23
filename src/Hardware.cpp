@@ -21,6 +21,8 @@ bool ignored = false;
 
 const char* const DISPLAY_NAMES[] = {"none", "ssd1306", "st7789"};
 const char* const INPUT_NAMES[] = {"gpio", "pcf8574"};
+const char* const BUTTON_MODES[] = {"inputs", "adc"};
+const char* const ADC_BUTTON_NAMES[] = {"up", "down", "left", "right", "enter", "idle"};
 
 // ---------- pin rules ----------
 
@@ -96,15 +98,27 @@ bool validate(const HardwareConfig& c, String& err) {
         return false;
     }
 
+    const bool adcButtons = c.buttons == ButtonMode::Adc;
+    if (adcButtons) {
+        if (c.btnAdc < 0) {
+            err = "btn_adc is required with buttons = adc";
+            return false;
+        }
+        if (!checkAdc("btn_adc", c.btnAdc, err)) return false;
+        use("btn_adc", c.btnAdc);
+    }
     if (c.inputs == InputMode::Gpio) {
         // Pull-ups needed: input-only pins (no pull-up) are rejected by the output check
         for (uint8_t i = 0; i < 4; i++) {
-            if (c.button[i] < 0) {
-                err = String(BTN[i]) + " is required with inputs = gpio";
-                return false;
+            if (!adcButtons) {
+                if (c.button[i] < 0) {
+                    err = String(BTN[i]) + " is required with inputs = gpio (or use buttons = adc)";
+                    return false;
+                }
+                if (!checkPin(BTN[i], c.button[i], true, err)) return false;
+                use(BTN[i], c.button[i]);
             }
-            if (!checkPin(BTN[i], c.button[i], true, err) || !checkPin(AUX[i], c.aux[i], true, err)) return false;
-            use(BTN[i], c.button[i]);
+            if (!checkPin(AUX[i], c.aux[i], true, err)) return false;
             use(AUX[i], c.aux[i]);
         }
     }
@@ -207,6 +221,20 @@ bool parse(const JsonDocument& d, HardwareConfig& c, String& err) {
     }
     c.inputs = (InputMode)in;
     c.expanderAddr = d["expander_addr"] | 0x20;
+
+    const int bm = indexOf(BUTTON_MODES, d["buttons"] | "inputs");
+    if (bm < 0) {
+        err = "buttons: inputs or adc";
+        return false;
+    }
+    c.buttons = (ButtonMode)bm;
+    c.btnAdc = d["btn_adc"] | -1;
+    JsonArrayConst values = d["btn_adc_values"].as<JsonArrayConst>();
+    if (values.size() != ADC_BTN_COUNT) {
+        err = "btn_adc_values: 6 readings (up, down, left, right, enter, idle, as ExpressLRS joystick_values)";
+        return false;
+    }
+    for (uint8_t i = 0; i < ADC_BTN_COUNT; i++) c.btnAdcValues[i] = constrain((int)(values[i] | 0), 0, 4095);
     c.i2cSda = d["i2c_sda"] | -1;
     c.i2cScl = d["i2c_scl"] | -1;
 
@@ -325,6 +353,23 @@ bool Hardware::set(const String& key, const String& value, String& err) {
             err = key + ": true or false";
             return false;
         }
+    } else if (v.is<JsonArray>()) {
+        // Comma-separated list: hw set btn_adc_values 0,740,1310,2050,2820,4095
+        JsonArray a = v.to<JsonArray>();
+        int from = 0;
+        while (from <= (int)value.length()) {
+            int comma = value.indexOf(',', from);
+            if (comma < 0) comma = value.length();
+            const String item = value.substring(from, comma);
+            char* end;
+            const long n = strtol(item.c_str(), &end, 0);
+            if (!item.length() || *end) {
+                err = key + ": comma-separated numbers expected";
+                return false;
+            }
+            a.add(n);
+            from = comma + 1;
+        }
     } else if (v.is<long>()) {
         char* end;
         const long n = strtol(value.c_str(), &end, 0);  // accepts 0x3C
@@ -340,6 +385,19 @@ bool Hardware::set(const String& key, const String& value, String& err) {
     serializeJson(doc, json);
     return save(json, err);
 }
+
+bool Hardware::setButtonValue(AdcButton b, uint16_t value, String& err) {
+    JsonDocument doc;
+    if (!merge(loadSaved(), doc, err)) return false;
+    doc["btn_adc_values"][(uint8_t)b] = value;
+    String json;
+    serializeJson(doc, json);
+    if (!save(json, err)) return false;
+    active.btnAdcValues[b] = value;  // learning takes effect without a reboot
+    return true;
+}
+
+const char* Hardware::adcButtonName(AdcButton b) { return ADC_BUTTON_NAMES[b]; }
 
 void Hardware::reset() {
     Preferences p;

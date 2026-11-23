@@ -35,6 +35,7 @@ const char HELP[] =
     "  hw set <key> <value>    change one key (saved, applies after reboot)\n"
     "  hw saved | default      pending / built-in hardware.json\n"
     "  hw reset                delete the saved hardware.json\n"
+    "  hw learn [up|down|left|right|enter|idle]  5-way button on one ADC pin: store a reading\n"
     "  reboot\n"
     "Keys: name, deadband, invert.<axis>, map.<axis> (ch 1-4), safestart,\n"
     "      linkalarm, linktimeout, batt.ratio, batt.cells, batt.warn,\n"
@@ -347,6 +348,36 @@ String wifiCommand(const String& arg) {
     return "ERR usage: wifi [on|off|status] | wifi home <ssid> <password> | wifi forget";
 }
 
+// Resistor-ladder menu buttons: hold a direction and store its reading
+String learnButton(const String& name) {
+    const HardwareConfig& hw = Hardware::get();
+    if (hw.buttons != ButtonMode::Adc) return "ERR menu buttons are not on the ADC: hw set buttons adc, then reboot";
+
+    // Average a few readings; the RC task refreshes the value every cycle
+    uint32_t sum = 0;
+    for (uint8_t i = 0; i < 8; i++) {
+        sum += State::buttonAdc.load(std::memory_order_relaxed);
+        delay(10);
+    }
+    const uint16_t now = sum / 8;
+
+    if (!name.length()) {
+        String o = "Ladder on GPIO" + String(hw.btnAdc) + ", reading now: " + now + "\nLearned:";
+        for (uint8_t i = 0; i < ADC_BTN_COUNT; i++) {
+            o += String("  ") + Hardware::adcButtonName((AdcButton)i) + " " + hw.btnAdcValues[i];
+        }
+        return o + "\nHold a direction and send: hw learn up|down|left|right|enter (idle = released)";
+    }
+    for (uint8_t i = 0; i < ADC_BTN_COUNT; i++) {
+        if (name == Hardware::adcButtonName((AdcButton)i)) {
+            String err;
+            if (!Hardware::setButtonValue((AdcButton)i, now, err)) return "ERR " + err;
+            return "OK " + name + " = " + now + " (saved, already active)";
+        }
+    }
+    return "ERR direction: up, down, left, right, enter or idle";
+}
+
 String hwCommand(const String& arg) {
     const int sp = arg.indexOf(' ');
     String sub = sp < 0 ? arg : arg.substring(0, sp);
@@ -357,6 +388,7 @@ String hwCommand(const String& arg) {
     }
     if (sub == "saved") return Hardware::savedJson();
     if (sub == "default") return Hardware::defaultJson();
+    if (sub == "learn") return learnButton(rest);
     if (sub == "reset") {
         Hardware::reset();
         return "OK saved hardware.json deleted, built-in applies after 'reboot'";
@@ -370,7 +402,7 @@ String hwCommand(const String& arg) {
         if (!Hardware::set(rest.substring(0, s2), value, err)) return "ERR " + err;
         return "OK saved, applies after 'reboot'";
     }
-    return "ERR usage: hw [set <key> <value> | saved | default | reset]";
+    return "ERR usage: hw [set <key> <value> | saved | default | reset | learn]";
 }
 
 String frameText() {
