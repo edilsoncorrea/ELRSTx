@@ -194,7 +194,7 @@ Se girar para um lado mover o cursor ao contrário: `hw set enc_reverse true`. O
 - **Rede de casa:** salve uma vez com `wifi home <rede> <senha>`. Depois, `wifi on` (ou menu WiFi / OTA) conecta nela e a página abre em **http://elrstx.local** (ou pelo IP mostrado em `wifi` e na tela). Só redes de 2.4 GHz; `wifi scan` lista as que o rádio enxerga.
 - **Rede própria:** sem rede de casa salva, ou se ela não responder em 20 s (ex.: no campo), o rádio cria a rede `ELRSTx-XXXX` (senha padrão `elrstx1234`) em `http://192.168.4.1`. Se a de casa falhar, `wifi` mostra o motivo (senha errada, rede não encontrada...).
 - **Página web:** status, comandos, `hardware.json` (`/hardware`) e upload do `firmware.bin`.
-- **OTA pelo PlatformIO:** `pio run -e ota -t upload` (vai para `elrstx.local`). Na rede própria: `pio run -e ota -t upload --upload-port 192.168.4.1`.
+- **OTA pelo PlatformIO:** ligue o WiFi do rádio e rode `pio run -e ota -t upload` (vai para `elrstx.local`). Na rede própria: `pio run -e ota -t upload --upload-port 192.168.4.1`. O envio é por HTTP para a página `/update`, como o botão Upload da página web, então o firewall do Windows não atrapalha.
 
 Deixe o WiFi desligado durante o voo: ele usa 2.4 GHz, a mesma faixa dos módulos ELRS de 2.4 GHz.
 

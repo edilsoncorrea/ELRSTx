@@ -121,7 +121,7 @@ void setupRoutes() {
         "/update", HTTP_POST,
         [] {
             const bool ok = !Update.hasError();
-            server.send(200, "text/plain", ok ? "Update OK, rebooting..." : "Update FAILED");
+            server.send(ok ? 200 : 500, "text/plain", ok ? "Update OK, rebooting..." : "Update FAILED");
             if (ok) {
                 delay(500);
                 ESP.restart();
