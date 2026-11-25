@@ -74,6 +74,7 @@ struct CRSFTelemetry {
 
     uint32_t goodFrames;
     uint32_t badFrames;
+    uint32_t rxBytes;          // every byte seen on the RX line, frame or not
 };
 
 class CRSF {

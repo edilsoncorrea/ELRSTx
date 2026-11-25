@@ -466,7 +466,7 @@ String Commands::statusText() {
 
     o += "Channels:";
     for (uint8_t i = 0; i < 8; i++) o += " " + String(st.channels[i]);
-    o += "\nFrames sent: " + String(st.frames) + "  telemetry ok/bad: " + t.goodFrames + "/" + t.badFrames + "\n";
+    o += "\nFrames sent: " + String(st.frames) + "  telemetry ok/bad: " + t.goodFrames + "/" + t.badFrames + "  RX bytes: " + t.rxBytes + "\n";
     if (st.safeStartHold) o += "SAFE START: move throttle to minimum and switch AUX1 (arm) off\n";
     const HardwareConfig& hw = Hardware::get();
     o += "CRSF: " + (hw.halfDuplex() ? "one wire GPIO" + String(hw.crsfRx) : "RX GPIO" + String(hw.crsfRx) + " TX GPIO" + hw.crsfTx) +

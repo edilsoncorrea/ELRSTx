@@ -153,6 +153,7 @@ void CRSF::sendExtendedFrame(uint8_t type, uint8_t dest, const uint8_t* payload,
 }
 
 void CRSF::processByte(uint8_t b, uint32_t nowMs) {
+    _telem.rxBytes++;
     if (_rxPos == 0) {
         if (b == CRSF_ADDRESS_RADIO || b == CRSF_SYNC_BYTE || b == CRSF_ADDRESS_TRANSMITTER) _rx[_rxPos++] = b;
         return;
